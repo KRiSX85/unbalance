@@ -24,8 +24,39 @@ export interface Config {
   refreshRate: number;
   logLines: number;
   speedWindow: string;
+  tvLibraryPath: string;
   authEnabled: boolean;
   authUsername: string;
+}
+
+export interface AutoGatherDiskPresence {
+  diskName: string;
+  videoCount: number;
+  videoBytes: number;
+  totalBytes: number;
+  emptyOnly: boolean;
+  sidecarOnly: boolean;
+}
+
+export interface AutoGatherShow {
+  name: string;
+  path: string;
+  status: string;
+  split: boolean;
+  ready: boolean;
+  totalVideoBytes: number;
+  totalBytes: number;
+  videoDisks: AutoGatherDiskPresence[];
+  sidecarOnlyDisks: string[];
+  emptyOnlyDisks: string[];
+  cachePoolsWithVideo: string[];
+}
+
+export interface AutoGatherScanResult {
+  libraryPath: string;
+  shows: AutoGatherShow[];
+  warnings?: string[];
+  error?: string;
 }
 
 export interface AuthStatus {

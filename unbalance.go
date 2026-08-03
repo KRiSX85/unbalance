@@ -33,6 +33,7 @@ var cli struct {
 	RefreshRate    int      `env:"REFRESH_RATE" default:"1000" help:"how often to refresh the ui while running a command (in milliseconds)"`
 	LogLines       int      `env:"LOG_LINES" default:"100" help:"number of log lines shown in the web ui logs page"`
 	SpeedWindow    string   `env:"SPEED_WINDOW" default:"90s" help:"time window used to calculate recent transfer speed"`
+	TvLibraryPath  string   `env:"TV_LIBRARY_PATH" default:"data/media/tv" help:"TV library path relative to /mnt/user used by Auto Gather"`
 	AuthEnabled    bool     `env:"AUTH_ENABLED" default:"false" help:"require login before using the web ui"`
 	AuthUsername   string   `env:"AUTH_USERNAME" default:"admin" help:"admin username used to log into the web ui"`
 	AuthPassword   string   `env:"AUTH_PASSWORD_HASH" default:"" help:"stored admin password hash (Argon2id for new passwords; bcrypt remains supported for migration)"`
@@ -83,6 +84,7 @@ func main() {
 			RefreshRate:    cli.RefreshRate,
 			LogLines:       cli.LogLines,
 			SpeedWindow:    cli.SpeedWindow,
+			TvLibraryPath:  cli.TvLibraryPath,
 			AuthEnabled:    cli.AuthEnabled,
 			AuthUsername:   cli.AuthUsername,
 			AuthPassword:   cli.AuthPassword,

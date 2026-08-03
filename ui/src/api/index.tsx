@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -35,6 +35,7 @@ export class Api {
         refreshRate: 0,
         logLines: 100,
         speedWindow: '90s',
+        tvLibraryPath: 'data/media/tv',
         authEnabled: false,
         authUsername: 'admin',
       };
@@ -147,6 +148,36 @@ export class Api {
     } catch (e) {
       return null;
     }
+  }
+
+  static async scanAutoGather(): Promise<AutoGatherScanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/scan`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async setTvLibraryPath(path: string): Promise<string> {
+    const options = {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      body: JSON.stringify(path),
+    };
+    const response = await fetch(`${Api.host}/config/tvLibraryPath`, options);
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const payload = await response.json();
+        message = payload?.message || payload || message;
+      } catch {
+        const text = await response.text();
+        if (text) message = text;
+      }
+      throw new Error(typeof message === 'string' ? message : 'Invalid TV library path');
+    }
+    const config = await response.json();
+    return config.tvLibraryPath || path;
   }
 
   static async getLog(): Promise<Array<string>> {

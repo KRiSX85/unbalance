@@ -185,6 +185,7 @@ func LoadEnv(location string, config *domain.Config) error {
 	config.Verbosity, _ = file.Section("").Key("VERBOSITY").Int()
 	config.RefreshRate, _ = file.Section("").Key("REFRESH_RATE").Int()
 	config.SpeedWindow = file.Section("").Key("SPEED_WINDOW").MustString("90s")
+	config.TvLibraryPath = file.Section("").Key("TV_LIBRARY_PATH").MustString("data/media/tv")
 	config.AuthPassword = file.Section("").Key("AUTH_PASSWORD_HASH").String()
 
 	return nil
@@ -213,6 +214,10 @@ func SaveEnv(location string, config domain.Config) error {
 		config.SpeedWindow = "90s"
 	}
 	file.Section("").Key("SPEED_WINDOW").SetValue(config.SpeedWindow)
+	if config.TvLibraryPath == "" {
+		config.TvLibraryPath = "data/media/tv"
+	}
+	file.Section("").Key("TV_LIBRARY_PATH").SetValue(config.TvLibraryPath)
 	file.Section("").Key("AUTH_PASSWORD_HASH").SetValue(config.AuthPassword)
 
 	tmpName := location + ".tmp"

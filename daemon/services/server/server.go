@@ -111,6 +111,7 @@ func (s *Server) Start() error {
 	protected.GET("/tree/:route", s.getTree)
 	protected.GET("/locate/:route", s.locate)
 	protected.GET("/size/:route", s.size)
+	protected.GET("/auto-gather/scan", s.autoGatherScan)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -120,6 +121,7 @@ func (s *Server) Start() error {
 	protected.PUT("/config/verbosity", s.setVerbosity, s.requireCSRF)
 	protected.PUT("/config/refreshRate", s.setRefreshRate, s.requireCSRF)
 	protected.PUT("/config/logLines", s.setLogLines, s.requireCSRF)
+	protected.PUT("/config/tvLibraryPath", s.setTvLibraryPath, s.requireCSRF)
 
 	port := fmt.Sprintf(":%s", s.ctx.Port)
 	go func() {
@@ -283,6 +285,25 @@ func (s *Server) size(c echo.Context) error {
 
 func (s *Server) getLog(c echo.Context) error {
 	return c.JSON(200, s.core.GetLog())
+}
+
+func (s *Server) autoGatherScan(c echo.Context) error {
+	return c.JSON(200, s.core.ScanAutoGather())
+}
+
+func (s *Server) setTvLibraryPath(c echo.Context) error {
+	var value string
+	err := c.Bind(&value)
+	if err != nil {
+		return err
+	}
+
+	config, err := s.core.SetTvLibraryPath(value)
+	if err != nil {
+		return echo.NewHTTPError(400, err.Error())
+	}
+
+	return c.JSON(200, config)
 }
 
 func (s *Server) toggleDryRun(c echo.Context) error {

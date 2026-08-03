@@ -17,6 +17,7 @@ import { Validation as ScatterValidation } from '~/flows/scatter/transfer/valida
 import { Gather } from '~/flows/gather/gather';
 import { Select as GatherSelect } from '~/flows/gather/select/select';
 import { Targets } from '~/flows/gather/transfer/targets';
+import { AutoGather } from '~/flows/auto-gather/auto-gather';
 import { History } from '~/flows/history/history';
 import { Settings } from '~/flows/settings/settings';
 import { Notifications } from '~/flows/settings/notifications';
@@ -107,6 +108,10 @@ const router = createBrowserRouter([
                 ],
               },
             ],
+          },
+          {
+            path: '/auto-gather',
+            element: <AutoGather />,
           },
           {
             path: '/history',
