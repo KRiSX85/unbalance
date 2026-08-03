@@ -201,7 +201,7 @@ func getArrayData() (*domain.Unraid, error) {
 			disk.BlocksFree = stat.Bavail
 
 			//
-			if int64(blockSize) != stat.Bsize {
+			if int64(blockSize) != int64(stat.Bsize) {
 				if !hasBlockSize {
 					blockSize = uint64(stat.Bsize)
 				} else {
