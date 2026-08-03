@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
 	"unbalance/daemon/domain"
 	"unbalance/daemon/lib"
 	"unbalance/daemon/logger"
@@ -315,13 +316,15 @@ func clampLogLines(value int) int {
 }
 
 func (c *Core) GetLog() []string {
-	cmd := fmt.Sprintf("tail -n %d /var/log/unbalanced.log", clampLogLines(c.ctx.LogLines))
+	if c.ctx == nil || c.ctx.Paths.LogFile == "" {
+		msg := "internal configuration error: log file path is not configured"
+		logger.Red("%s", msg)
+		return []string{msg}
+	}
+	logFile := c.ctx.Paths.LogFile
+	cmd := fmt.Sprintf("tail -n %d %s", clampLogLines(c.ctx.LogLines), strconv.Quote(logFile))
 
 	log := make([]string, 0)
-
-	// err := lib.Shell(cmd, mlog.Warning, "Get Log error:", "", func(line string) {
-	// 	log = append(log, line)
-	// })
 
 	err := lib.Shell(cmd, "", func(line string) {
 		log = append(log, line)

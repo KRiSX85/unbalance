@@ -2,8 +2,13 @@ package server
 
 import (
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
+
+	"unbalance/daemon/domain"
 )
 
 func TestSessionStillValid(t *testing.T) {
@@ -66,5 +71,52 @@ func TestUpgraderCheckOrigin(t *testing.T) {
 				t.Fatalf("CheckOrigin(origin=%q,host=%q) = %v, want %v", tc.origin, tc.host, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSessionFileUsesConfiguredSessionsFile(t *testing.T) {
+	root := t.TempDir()
+	paths, err := domain.ResolveRuntimePaths(
+		filepath.Join(root, "data"),
+		filepath.Join(root, "logs"),
+		domain.ResolveRuntimeOptions{CustomLogsDir: true},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := domain.EnsureRuntimeDirs(paths); err != nil {
+		t.Fatal(err)
+	}
+
+	s := &Server{
+		ctx:      &domain.Context{Paths: paths},
+		sessions: newSessionStore(),
+	}
+
+	location, err := s.sessionFile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if location != paths.SessionsFile {
+		t.Fatalf("sessionFile = %q, want %q", location, paths.SessionsFile)
+	}
+
+	s.sessions["sid"] = session{Username: "admin", CSRF: "token", Expires: time.Now().Add(time.Hour)}
+	if err := s.saveSessionsLocked(); err != nil {
+		t.Fatalf("saveSessionsLocked: %v", err)
+	}
+	if _, err := os.Stat(paths.SessionsFile); err != nil {
+		t.Fatalf("expected sessions at configured path %s: %v", paths.SessionsFile, err)
+	}
+	if filepath.Dir(paths.SessionsFile) != paths.DataDir {
+		t.Fatalf("sessions not under configured data dir")
+	}
+}
+
+func TestSessionFileMissingPathReturnsConfigError(t *testing.T) {
+	s := &Server{ctx: &domain.Context{}}
+	_, err := s.sessionFile()
+	if err == nil || !strings.Contains(err.Error(), "internal configuration error") {
+		t.Fatalf("expected configuration error, got %v", err)
 	}
 }

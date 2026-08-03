@@ -8,12 +8,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/labstack/echo/v4"
 
-	"unbalance/daemon/common"
 	"unbalance/daemon/logger"
 )
 
@@ -567,12 +565,18 @@ func clientKey(c echo.Context) string {
 	return ip
 }
 
-func (s *Server) sessionFile() string {
-	return filepath.Join(common.PluginLocation, common.SessionFilename)
+func (s *Server) sessionFile() (string, error) {
+	if s.ctx == nil || s.ctx.Paths.SessionsFile == "" {
+		return "", fmt.Errorf("internal configuration error: sessions file path is not configured")
+	}
+	return s.ctx.Paths.SessionsFile, nil
 }
 
 func (s *Server) loadSessions() error {
-	location := s.sessionFile()
+	location, err := s.sessionFile()
+	if err != nil {
+		return err
+	}
 	file, err := os.Open(location)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -610,7 +614,10 @@ func (s *Server) loadSessions() error {
 }
 
 func (s *Server) saveSessionsLocked() error {
-	location := s.sessionFile()
+	location, err := s.sessionFile()
+	if err != nil {
+		return err
+	}
 	tmpName := location + ".tmp"
 
 	file, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)

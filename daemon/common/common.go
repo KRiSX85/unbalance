@@ -4,12 +4,16 @@ const (
 	PluginName      = "unbalanced"
 	APIEndpoint     = "/api"
 	MailCmd         = "/usr/local/emhttp/webGui/scripts/notify" // MailCmd - location of notify command
-	PluginLocation  = "/boot/config/plugins/unbalanced"         // PluginLocation - plugin's base config path
+	DefaultDataDir  = "/boot/config/plugins/unbalanced"         // DefaultDataDir - official plugin config path
+	DefaultLogsDir  = "/var/log"
+	PluginLocation  = DefaultDataDir // retained alias for compatibility
 	ChanCapacity    = 3
 	HistoryCapacity = 25
+	EnvFilename     = "unbalanced.env"
 	HistoryFilename = "unbalanced.hist"
 	HistoryVersion  = 2
 	SessionFilename = "unbalanced.sessions"
+	LogFilename     = "unbalanced.log"
 	RsyncArgs       = "-avPR"
 )
 

@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
@@ -20,7 +19,6 @@ const (
 	certDir    = "/boot/config/ssl/certs"
 	mailCmd    = "/usr/local/emhttp/webGui/scripts/notify"
 	timeFormat = "Jan _2, 2006 15:04:05"
-	settings   = "/boot/config/plugins/unbalanced"
 )
 
 var (
@@ -331,15 +329,14 @@ func (c *Core) SetAuth(passwordHash string) error {
 }
 
 func (c *Core) saveSettings() error {
-	location := filepath.Join(settings, "unbalanced.env")
-	return lib.SaveEnv(location, c.ctx.Config)
+	return lib.SaveEnv(c.ctx.Paths.EnvFile, c.ctx.Config)
 }
 
 // HISTORY HANDLERS
 func (c *Core) historyRead() (*domain.History, error) {
 	var history domain.History
 
-	fileName := filepath.Join(common.PluginLocation, common.HistoryFilename)
+	fileName := c.ctx.Paths.HistoryFile
 
 	file, err := os.Open(fileName)
 	if err != nil {
@@ -369,7 +366,7 @@ func (c *Core) historyRead() (*domain.History, error) {
 }
 
 func (c *Core) historyWrite(history *domain.History) error {
-	tmpName := filepath.Join(common.PluginLocation, common.HistoryFilename+"."+shortid.MustGenerate())
+	tmpName := c.ctx.Paths.HistoryFile + "." + shortid.MustGenerate()
 
 	file, err := os.Create(tmpName)
 	if err != nil {
@@ -383,7 +380,7 @@ func (c *Core) historyWrite(history *domain.History) error {
 		return err
 	}
 
-	return os.Rename(tmpName, filepath.Join(common.PluginLocation, common.HistoryFilename))
+	return os.Rename(tmpName, c.ctx.Paths.HistoryFile)
 }
 
 func (c *Core) updateHistory(history *domain.History, operation *domain.Operation) {

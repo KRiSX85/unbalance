@@ -212,9 +212,9 @@ func (c *Core) sendMailFeedback(fstarted, ffinished string, elapsed time.Duratio
 			\n%d file(s)/folder(s) with a group other than 'users'
 			\n%d folder(s) with a permission other than 'drwxrwxrwx'
 			\n%d files(s) with a permission other than '-rw-rw-rw-' or '-r--r--r--'
-			\n\nCheck the log file (/var/log/unbalanced.log) for additional information
+			\n\nCheck the log file (%s) for additional information
 			\n\nIt's strongly suggested to install the Fix Common Plugins and run the Docker Safe New Permissions command
-		`, plan.OwnerIssue, plan.GroupIssue, plan.FolderIssue, plan.FileIssue)
+		`, plan.OwnerIssue, plan.GroupIssue, plan.FolderIssue, plan.FileIssue, c.ctx.Paths.LogFile)
 	}
 
 	if sendErr := sendmail(c.ctx.Config.NotifyPlan, subject, message, false); sendErr != nil {

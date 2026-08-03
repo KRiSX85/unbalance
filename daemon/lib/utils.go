@@ -192,10 +192,12 @@ func LoadEnv(location string, config *domain.Config) error {
 }
 
 func SaveEnv(location string, config domain.Config) error {
-	// load file
 	file, err := ini.Load(location)
 	if err != nil {
-		return err
+		if !os.IsNotExist(err) {
+			return err
+		}
+		file = ini.Empty()
 	}
 
 	ini.PrettyFormat = false
