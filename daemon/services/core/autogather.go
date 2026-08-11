@@ -43,7 +43,11 @@ func (c *Core) ScanAutoGather() domain.AutoGatherScanResult {
 	}
 
 	arrayDisks, cacheDisks := autogather.PartitionDisks(unraid.Disks)
-	return autogather.ScanLibrary(cleaned, arrayDisks, cacheDisks)
+
+	scan := autogather.ScanLibrary(cleaned, arrayDisks, cacheDisks)
+	// Stage 2 read-only enrichment: compute eligible gather destination
+	// recommendations for split shows using the array disk free space.
+	return c.addAutoGatherRecommendations(scan, unraid)
 }
 
 // SetTvLibraryPath validates, persists, and returns the normalized library path

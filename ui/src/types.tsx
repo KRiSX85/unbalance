@@ -47,9 +47,27 @@ export interface AutoGatherShow {
   totalVideoBytes: number;
   totalBytes: number;
   videoDisks: AutoGatherDiskPresence[];
-  sidecarOnlyDisks: string[];
-  emptyOnlyDisks: string[];
+  sidecarOnlyDisks: AutoGatherDiskPresence[];
+  emptyOnlyDisks: AutoGatherDiskPresence[];
   cachePoolsWithVideo: string[];
+
+  cleanupCandidateDisks?: string[];
+  cleanupCandidateCount?: number;
+
+  recommendedTargetDisk?: string;
+  moveRequiredBytes?: number;
+  gatherTargets?: AutoGatherTargetCandidate[];
+  noEligibleReason?: string;
+}
+
+export interface AutoGatherTargetCandidate {
+  diskName: string;
+  eligible: boolean;
+  ineligibleReason?: string;
+  moveRequiredBytes: number;
+  currentShowBytesOnTarget: number;
+  freeBytes: number;
+  projectedFreeBytes: number;
 }
 
 export interface AutoGatherScanResult {

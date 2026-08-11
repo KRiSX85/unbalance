@@ -76,6 +76,14 @@ func scanShowOnDisk(entry string) (showDiskStats, error) {
 			return nil
 		}
 
+		// TotalBytes is the sum of regular-file apparent sizes (Info().Size /
+		// st_size) under this show location. It includes videos, sidecars
+		// (subtitles/NFO/artwork/etc.) and other regular files. It does not
+		// include directory metadata sizes, symlink targets, or special files.
+		// Symlink show roots are treated as EmptyOnly above and never walked.
+		// Manual Gather getItems() instead uses `du -bs` on each immediate
+		// child, which can include directory apparent sizes — so Stage 1
+		// TotalBytes is representative but not guaranteed bit-identical.
 		if !d.Type().IsRegular() {
 			return nil
 		}
@@ -114,12 +122,13 @@ func classifyShow(
 	cacheOrder []string,
 ) domain.AutoGatherShow {
 	show := domain.AutoGatherShow{
-		Name:                name,
-		Path:                relPath,
-		VideoDisks:          make([]domain.AutoGatherDiskPresence, 0),
-		SidecarOnlyDisks:    make([]string, 0),
-		EmptyOnlyDisks:      make([]string, 0),
-		CachePoolsWithVideo: make([]string, 0),
+		Name:                  name,
+		Path:                  relPath,
+		VideoDisks:            make([]domain.AutoGatherDiskPresence, 0),
+		SidecarOnlyDisks:      make([]domain.AutoGatherDiskPresence, 0),
+		EmptyOnlyDisks:        make([]domain.AutoGatherDiskPresence, 0),
+		CachePoolsWithVideo:   make([]string, 0),
+		CleanupCandidateDisks: make([]string, 0),
 	}
 
 	arrayVideoDisks := 0
@@ -133,6 +142,8 @@ func classifyShow(
 		show.TotalBytes += stats.TotalBytes
 		show.TotalVideoBytes += stats.VideoBytes
 
+		// Always retain all-file TotalBytes for every physical array presence.
+		// VideoBytes remains the sole quantity used for Split / video presence.
 		presence := domain.AutoGatherDiskPresence{
 			DiskName:   diskName,
 			VideoCount: stats.VideoCount,
@@ -150,10 +161,12 @@ func classifyShow(
 			show.VideoDisks = append(show.VideoDisks, presence)
 		case stats.EmptyOnly:
 			presence.EmptyOnly = true
-			show.EmptyOnlyDisks = append(show.EmptyOnlyDisks, diskName)
+			show.EmptyOnlyDisks = append(show.EmptyOnlyDisks, presence)
+			// Empty-folder-only array locations are cleanup candidates (display only).
+			show.CleanupCandidateDisks = append(show.CleanupCandidateDisks, diskName)
 		case stats.TotalBytes > 0:
 			presence.SidecarOnly = true
-			show.SidecarOnlyDisks = append(show.SidecarOnlyDisks, diskName)
+			show.SidecarOnlyDisks = append(show.SidecarOnlyDisks, presence)
 		}
 	}
 
@@ -169,6 +182,8 @@ func classifyShow(
 			show.CachePoolsWithVideo = append(show.CachePoolsWithVideo, poolName)
 		}
 	}
+
+	show.CleanupCandidateCount = len(show.CleanupCandidateDisks)
 
 	switch {
 	case len(show.CachePoolsWithVideo) > 0:

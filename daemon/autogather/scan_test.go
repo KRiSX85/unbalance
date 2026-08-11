@@ -90,7 +90,15 @@ func TestScanLibraryEmptyDirectoryShells(t *testing.T) {
 		t.Fatalf("empty shells must not create a split: status=%q split=%v", show.Status, show.Split)
 	}
 	if len(show.EmptyOnlyDisks) != 2 {
-		t.Fatalf("empty-only disks = %v", show.EmptyOnlyDisks)
+		t.Fatalf("empty-only disks = %+v", show.EmptyOnlyDisks)
+	}
+	for _, d := range show.EmptyOnlyDisks {
+		if d.TotalBytes != 0 || !d.EmptyOnly {
+			t.Fatalf("empty-only presence must retain zero TotalBytes: %+v", d)
+		}
+	}
+	if show.CleanupCandidateCount != 2 || len(show.CleanupCandidateDisks) != 2 {
+		t.Fatalf("cleanup candidates = %v count=%d", show.CleanupCandidateDisks, show.CleanupCandidateCount)
 	}
 }
 
@@ -113,8 +121,14 @@ func TestScanLibrarySidecarOnlyOnAdditionalDisk(t *testing.T) {
 	if show.Split {
 		t.Fatalf("sidecar-only disk must not create a split")
 	}
-	if len(show.SidecarOnlyDisks) != 1 || show.SidecarOnlyDisks[0] != "disk2" {
-		t.Fatalf("sidecar-only disks = %v", show.SidecarOnlyDisks)
+	if len(show.SidecarOnlyDisks) != 1 || show.SidecarOnlyDisks[0].DiskName != "disk2" {
+		t.Fatalf("sidecar-only disks = %+v", show.SidecarOnlyDisks)
+	}
+	if show.SidecarOnlyDisks[0].TotalBytes == 0 || !show.SidecarOnlyDisks[0].SidecarOnly {
+		t.Fatalf("sidecar-only presence must retain TotalBytes: %+v", show.SidecarOnlyDisks[0])
+	}
+	if show.CleanupCandidateCount != 0 {
+		t.Fatalf("sidecar-only must not be cleanup candidates: %v", show.CleanupCandidateDisks)
 	}
 }
 
@@ -168,8 +182,14 @@ func TestScanLibraryUnsupportedFilesDoNotCountAsVideo(t *testing.T) {
 	if show.Split {
 		t.Fatalf("unsupported files must not create a split")
 	}
-	if len(show.SidecarOnlyDisks) != 1 || show.SidecarOnlyDisks[0] != "disk2" {
-		t.Fatalf("sidecar-only disks = %v", show.SidecarOnlyDisks)
+	if len(show.SidecarOnlyDisks) != 1 || show.SidecarOnlyDisks[0].DiskName != "disk2" {
+		t.Fatalf("sidecar-only disks = %+v", show.SidecarOnlyDisks)
+	}
+	if show.SidecarOnlyDisks[0].TotalBytes == 0 || !show.SidecarOnlyDisks[0].SidecarOnly {
+		t.Fatalf("sidecar-only presence must retain TotalBytes: %+v", show.SidecarOnlyDisks[0])
+	}
+	if show.CleanupCandidateCount != 0 {
+		t.Fatalf("sidecar-only must not be cleanup candidates: %v", show.CleanupCandidateDisks)
 	}
 }
 

@@ -74,9 +74,25 @@ const matchesFilter = (show: AutoGatherShow, filter: ShowFilter) => {
   }
 };
 
+const diskNames = (
+  disks: { diskName: string }[] | string[] | undefined,
+): string => {
+  if (!disks || disks.length === 0) {
+    return 'none';
+  }
+  if (typeof disks[0] === 'string') {
+    return (disks as string[]).join(', ');
+  }
+  return (disks as { diskName: string }[])
+    .map((d) => d.diskName)
+    .join(', ');
+};
+
 const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
   show,
 }) => {
+  const [expanded, setExpanded] = React.useState(false);
+
   const videoDisks = show.videoDisks
     .filter((disk) => disk.videoBytes > 0 || disk.videoCount > 0)
     .map(
@@ -86,6 +102,12 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
         })`,
     )
     .join(', ');
+
+  const currentOnRecommended = show.gatherTargets?.find(
+    (t) => t.diskName === show.recommendedTargetDisk,
+  )?.currentShowBytesOnTarget;
+
+  const cleanupDisks = show.cleanupCandidateDisks ?? [];
 
   return (
     <div className="border-b border-slate-200 dark:border-gray-800 py-3 px-2">
@@ -117,17 +139,13 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
           <span className="text-slate-500 dark:text-gray-500">
             Sidecar-only:{' '}
           </span>
-          {show.sidecarOnlyDisks.length > 0
-            ? show.sidecarOnlyDisks.join(', ')
-            : 'none'}
+          {diskNames(show.sidecarOnlyDisks)}
         </div>
         <div>
           <span className="text-slate-500 dark:text-gray-500">
             Empty-folder-only:{' '}
           </span>
-          {show.emptyOnlyDisks.length > 0
-            ? show.emptyOnlyDisks.join(', ')
-            : 'none'}
+          {diskNames(show.emptyOnlyDisks)}
         </div>
         {show.cachePoolsWithVideo.length > 0 && (
           <div>
@@ -138,6 +156,90 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
           </div>
         )}
       </div>
+
+      {cleanupDisks.length > 0 && (
+        <div className="mt-2 text-sm text-slate-600 dark:text-gray-400">
+          Empty folder cleanup: {cleanupDisks.join(', ')}
+        </div>
+      )}
+
+      {show.status === 'waiting_for_mover' && (
+        <div className="mt-2 text-sm text-sky-700 dark:text-sky-300">
+          Recommendation deferred until cache video is moved.
+        </div>
+      )}
+
+      {show.status === 'split' && (
+        <div className="mt-3">
+          {show.recommendedTargetDisk ? (
+            <>
+              <div className="text-sm text-slate-700 dark:text-slate-200">
+                Recommended:{' '}
+                <span className="font-medium">{show.recommendedTargetDisk}</span>
+              </div>
+              <div className="text-sm text-slate-600 dark:text-gray-400">
+                Estimated move: {humanBytes(show.moveRequiredBytes || 0)}
+              </div>
+              <div className="text-sm text-slate-600 dark:text-gray-400">
+                Current show data on target:{' '}
+                {humanBytes(currentOnRecommended || 0)}
+              </div>
+              <button
+                type="button"
+                className="mt-2 text-xs text-slate-600 dark:text-gray-400 underline"
+                onClick={() => setExpanded((v) => !v)}
+                disabled={(show.gatherTargets?.length || 0) === 0}
+              >
+                {expanded ? 'Hide target candidates' : 'Show target candidates'}
+              </button>
+              {expanded && (show.gatherTargets?.length || 0) > 0 && (
+                <div className="mt-2 space-y-2">
+                  {show.gatherTargets!.map((t) => (
+                    <div
+                      key={t.diskName}
+                      className="border border-slate-200 dark:border-gray-800 rounded px-2 py-2"
+                    >
+                      <div className="font-medium text-slate-800 dark:text-gray-100">
+                        Target: {t.diskName}{' '}
+                        <span
+                          className={
+                            t.eligible
+                              ? 'text-green-700 dark:text-green-400'
+                              : 'text-amber-700 dark:text-amber-400'
+                          }
+                        >
+                          ({t.eligible ? 'eligible' : 'not eligible'})
+                        </span>
+                      </div>
+                      <div className="text-sm text-slate-600 dark:text-gray-400">
+                        Estimated all-file bytes to move:{' '}
+                        {humanBytes(t.moveRequiredBytes)}; Current all-file on
+                        target: {humanBytes(t.currentShowBytesOnTarget)}
+                      </div>
+                      <div className="text-sm text-slate-600 dark:text-gray-400">
+                        Free: {humanBytes(t.freeBytes)}; Projected free:{' '}
+                        {t.eligible
+                          ? humanBytes(t.projectedFreeBytes)
+                          : 'n/a'}
+                      </div>
+                      {!t.eligible && t.ineligibleReason && (
+                        <div className="text-sm text-amber-700 dark:text-amber-300">
+                          {t.ineligibleReason}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="text-sm text-amber-700 dark:text-amber-300">
+              No eligible physical array target found.
+              {show.noEligibleReason ? ` ${show.noEligibleReason}` : ''}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };
@@ -185,6 +287,24 @@ export const AutoGather: React.FunctionComponent = () => {
   const waitingCount = shows.filter(
     (show) => show.status === 'waiting_for_mover',
   ).length;
+  const recommendationsAvailable = shows.filter(
+    (show) =>
+      show.status === 'split' && Boolean(show.recommendedTargetDisk),
+  ).length;
+  const noEligibleCount = splitCount - recommendationsAvailable;
+  const sumIndependentMoves = shows.reduce((acc, show) => {
+    if (show.status !== 'split' || !show.recommendedTargetDisk) {
+      return acc;
+    }
+    return acc + (show.moveRequiredBytes || 0);
+  }, 0);
+  const showsWithCleanup = shows.filter(
+    (show) => (show.cleanupCandidateCount || 0) > 0,
+  ).length;
+  const emptyFolderLocations = shows.reduce(
+    (acc, show) => acc + (show.cleanupCandidateCount || 0),
+    0,
+  );
   const warnings = result?.warnings ?? [];
 
   return (
@@ -194,8 +314,8 @@ export const AutoGather: React.FunctionComponent = () => {
           Auto Gather
         </h1>
         <p className="text-sm text-slate-500 dark:text-gray-500 mt-1">
-          Read-only scan of immediate show folders under your saved TV library
-          path. No planning, transfers, or deletions in this stage.
+          Read-only scan and destination recommendations. No planning tickets,
+          transfers, or deletions in this stage.
         </p>
 
         <div className="flex flex-row flex-wrap items-center gap-2 mt-4">
@@ -256,26 +376,39 @@ export const AutoGather: React.FunctionComponent = () => {
       )}
 
       {result && (
-        <div className="px-4 py-2 text-sm text-slate-500 dark:text-gray-500 flex flex-row flex-wrap items-center gap-4">
-          <span>Library: /mnt/user/{result.libraryPath}</span>
-          <span>{shows.length} shows</span>
-          <span>{splitCount} split</span>
-          <span>{waitingCount} waiting for mover</span>
-          <label className="flex flex-row items-center gap-2">
-            <span>Filter</span>
-            <select
-              className="bg-white dark:bg-gray-900 border border-slate-300 dark:border-gray-700 rounded px-2 py-1"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value as ShowFilter)}
-            >
-              <option value="attention">Split + Waiting for Mover</option>
-              <option value="split">Split</option>
-              <option value="waiting_for_mover">Waiting for Mover</option>
-              <option value="consolidated">Consolidated</option>
-              <option value="no_video">No video</option>
-              <option value="all">All</option>
-            </select>
-          </label>
+        <div className="px-4 py-2 text-sm text-slate-500 dark:text-gray-500 flex flex-col gap-2">
+          <div className="flex flex-row flex-wrap items-center gap-4">
+            <span>Library: /mnt/user/{result.libraryPath}</span>
+            <span>{shows.length} shows</span>
+            <span>{splitCount} split</span>
+            <span>{waitingCount} waiting for mover</span>
+            <span>{recommendationsAvailable} recommendations</span>
+            <span>{noEligibleCount} no-eligible</span>
+            <span>{showsWithCleanup} shows with cleanup candidates</span>
+            <span>{emptyFolderLocations} empty folder locations</span>
+            <label className="flex flex-row items-center gap-2">
+              <span>Filter</span>
+              <select
+                className="bg-white dark:bg-gray-900 border border-slate-300 dark:border-gray-700 rounded px-2 py-1"
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as ShowFilter)}
+              >
+                <option value="attention">Split + Waiting for Mover</option>
+                <option value="split">Split</option>
+                <option value="waiting_for_mover">Waiting for Mover</option>
+                <option value="consolidated">Consolidated</option>
+                <option value="no_video">No video</option>
+                <option value="all">All</option>
+              </select>
+            </label>
+          </div>
+          <div className="text-xs text-slate-500 dark:text-gray-500">
+            Sum of independent recommended moves: {humanBytes(sumIndependentMoves)}.
+            Recommendations do not reserve capacity against one another; each
+            is calculated against current free space only. Move sizes are
+            estimates and can differ slightly from a live Gather plan near a
+            free-space boundary.
+          </div>
         </div>
       )}
 
