@@ -80,3 +80,49 @@ const (
 	AutoGatherStatusWaitingForMover = "waiting_for_mover"
 	AutoGatherStatusNoVideo         = "no_video"
 )
+
+// AutoGatherCanonicalPlanRequest is the Stage 3A read-only verification input.
+// ShowPath must be a single /mnt/user-relative path (e.g. data/media/tv/Show).
+// Stage2* fields are advisory snapshot values from the last Auto Gather scan.
+type AutoGatherCanonicalPlanRequest struct {
+	ShowPath                 string `json:"showPath"`
+	Stage2RecommendedTarget  string `json:"stage2RecommendedTarget,omitempty"`
+	Stage2EstimatedMoveBytes uint64 `json:"stage2EstimatedMoveBytes,omitempty"`
+}
+
+// AutoGatherCanonicalTarget is one destination evaluation from canonical Gather
+// planning (real getItems/du + Greedy), with Auto Gather array-only eligibility.
+type AutoGatherCanonicalTarget struct {
+	DiskName                   string  `json:"diskName"`
+	DiskPath                   string  `json:"diskPath"`
+	IsPhysicalArrayDisk        bool    `json:"isPhysicalArrayDisk"`
+	CanonicalEligible          bool    `json:"canonicalEligible"`
+	IneligibleReason           string  `json:"ineligibleReason,omitempty"`
+	CanonicalBytesToMove       uint64  `json:"canonicalBytesToMove"`
+	CanonicalCurrentBytesOnTarget uint64 `json:"canonicalCurrentBytesOnTarget"`
+	CanonicalItemCount         int     `json:"canonicalItemCount"`
+	FreeBytes                  uint64  `json:"freeBytes"`
+	DiskSizeBytes              uint64  `json:"diskSizeBytes"`
+	ProjectedFreeBytes         uint64  `json:"projectedFreeBytes"`
+	ProjectedFreePercent       float64 `json:"projectedFreePercent"`
+	MeetsPreferredFreeFloor    bool    `json:"meetsPreferredFreeFloor"`
+	RawGatherBinPresent        bool    `json:"rawGatherBinPresent"`
+}
+
+// AutoGatherCanonicalPlanResult compares Stage 2 advisory recommendation with
+// a fresh canonical Gather plan for exactly one show. Stage 3A never executes.
+type AutoGatherCanonicalPlanResult struct {
+	ShowPath                         string                      `json:"showPath"`
+	Stage2RecommendedTarget          string                      `json:"stage2RecommendedTarget,omitempty"`
+	Stage2EstimatedMoveBytes         uint64                      `json:"stage2EstimatedMoveBytes,omitempty"`
+	Stage2TargetStillCanonicalEligible bool                      `json:"stage2TargetStillCanonicalEligible"`
+	CanonicalRecommendedTarget       string                      `json:"canonicalRecommendedTarget,omitempty"`
+	CanonicalMoveBytes               uint64                      `json:"canonicalMoveBytes,omitempty"`
+	CanonicalProjectedFreeBytes      uint64                      `json:"canonicalProjectedFreeBytes,omitempty"`
+	CanonicalProjectedFreePercent    float64                     `json:"canonicalProjectedFreePercent,omitempty"`
+	BelowPreferredFreeFloor          bool                        `json:"belowPreferredFreeFloor,omitempty"`
+	CanonicalItemCountTotal          int                         `json:"canonicalItemCountTotal,omitempty"`
+	CanonicalTargets                 []AutoGatherCanonicalTarget `json:"canonicalTargets,omitempty"`
+	NoEligibleReason                 string                      `json:"noEligibleReason,omitempty"`
+	Error                            string                      `json:"error,omitempty"`
+}

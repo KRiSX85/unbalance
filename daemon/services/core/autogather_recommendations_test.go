@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 
+	"github.com/cskr/pubsub"
+
 	"unbalance/daemon/autogather"
 	"unbalance/daemon/common"
 	"unbalance/daemon/domain"
@@ -45,6 +47,7 @@ func newCoreForReserved(reservedAmount uint64, reservedUnit string) *Core {
 				ReservedAmount: reservedAmount,
 				ReservedUnit:   reservedUnit,
 			},
+			Hub: pubsub.New(64),
 		},
 		state:        &domain.State{Status: common.OpNeutral},
 		pendingPlans: make(map[string]*planTicket),

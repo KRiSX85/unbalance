@@ -14,9 +14,10 @@ import {
   useAutoGatherResult,
   useAutoGatherScanning,
 } from '~/state/auto-gather';
-import { AutoGatherShow } from '~/types';
+import { AutoGatherCanonicalPlanResult, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
 import { Icon } from '~/shared/icons/icon';
+import { Api } from '~/api';
 
 type ShowFilter =
   | 'attention'
@@ -92,6 +93,10 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
   show,
 }) => {
   const [expanded, setExpanded] = React.useState(false);
+  const [verifying, setVerifying] = React.useState(false);
+  const [canonical, setCanonical] =
+    React.useState<AutoGatherCanonicalPlanResult | null>(null);
+  const [canonicalError, setCanonicalError] = React.useState('');
 
   const videoDisks = show.videoDisks
     .filter((disk) => disk.videoBytes > 0 || disk.videoCount > 0)
@@ -108,6 +113,29 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
   )?.currentShowBytesOnTarget;
 
   const cleanupDisks = show.cleanupCandidateDisks ?? [];
+
+  const verifyWithGather = async () => {
+    setVerifying(true);
+    setCanonicalError('');
+    try {
+      const result = await Api.planAutoGatherCanonical({
+        showPath: show.path,
+        stage2RecommendedTarget: show.recommendedTargetDisk,
+        stage2EstimatedMoveBytes: show.moveRequiredBytes,
+      });
+      setCanonical(result);
+      if (result.error) {
+        setCanonicalError(result.error);
+      }
+    } catch (e) {
+      setCanonical(null);
+      setCanonicalError(
+        e instanceof Error ? e.message : 'Canonical planning failed',
+      );
+    } finally {
+      setVerifying(false);
+    }
+  };
 
   return (
     <div className="border-b border-slate-200 dark:border-gray-800 py-3 px-2">
@@ -269,11 +297,118 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
                   })}
                 </div>
               )}
+
+              <div className="mt-3 border-t border-slate-200 dark:border-gray-800 pt-3">
+                <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                  Canonical Gather verification (read-only)
+                </div>
+                <div className="text-xs text-slate-500 dark:text-gray-500 mt-1">
+                  Uses the real Gather planner for this show only. Estimated
+                  figures above remain Stage 2 advisory values. No move is
+                  started.
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  disabled={verifying}
+                  onClick={() => void verifyWithGather()}
+                >
+                  {verifying ? 'Planning…' : 'Verify with Gather'}
+                </Button>
+                {canonicalError && (
+                  <div className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+                    {canonicalError}
+                  </div>
+                )}
+                {canonical && !canonical.error && (
+                  <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-gray-400">
+                    <div>
+                      Stage 2 target still valid:{' '}
+                      <span className="font-medium text-slate-800 dark:text-gray-100">
+                        {canonical.stage2TargetStillCanonicalEligible
+                          ? 'Yes'
+                          : 'No'}
+                      </span>
+                    </div>
+                    <div>
+                      Canonical target:{' '}
+                      <span className="font-medium text-slate-800 dark:text-gray-100">
+                        {canonical.canonicalRecommendedTarget || 'none'}
+                      </span>
+                      {canonical.belowPreferredFreeFloor && (
+                        <span className="ml-2 text-amber-700 dark:text-amber-300">
+                          (below 10% preferred floor)
+                        </span>
+                      )}
+                    </div>
+                    <div>
+                      Canonical move:{' '}
+                      {humanBytes(canonical.canonicalMoveBytes || 0)}
+                      {canonical.canonicalProjectedFreePercent != null && (
+                        <>
+                          {'; projected free '}
+                          {(canonical.canonicalProjectedFreePercent || 0).toFixed(
+                            1,
+                          )}
+                          %
+                        </>
+                      )}
+                    </div>
+                    <div>
+                      Stage 2 estimated move:{' '}
+                      {humanBytes(canonical.stage2EstimatedMoveBytes || 0)}
+                    </div>
+                    {canonical.noEligibleReason && (
+                      <div className="text-amber-700 dark:text-amber-300">
+                        {canonical.noEligibleReason}
+                      </div>
+                    )}
+                    <div className="text-xs text-slate-500 dark:text-gray-500">
+                      Eligible physical targets:{' '}
+                      {(canonical.canonicalTargets || [])
+                        .filter((t) => t.canonicalEligible)
+                        .map(
+                          (t) =>
+                            `${t.diskName} (${humanBytes(t.canonicalBytesToMove)})`,
+                        )
+                        .join(', ') || 'none'}
+                    </div>
+                  </div>
+                )}
+              </div>
             </>
           ) : (
-            <div className="text-sm text-amber-700 dark:text-amber-300">
-              No eligible physical array target found.
-              {show.noEligibleReason ? ` ${show.noEligibleReason}` : ''}
+            <div className="mt-2 space-y-2">
+              <div className="text-sm text-amber-700 dark:text-amber-300">
+                No eligible physical array target found.
+                {show.noEligibleReason ? ` ${show.noEligibleReason}` : ''}
+              </div>
+              <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
+                Canonical Gather verification (read-only)
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={verifying}
+                onClick={() => void verifyWithGather()}
+              >
+                {verifying ? 'Planning…' : 'Verify with Gather'}
+              </Button>
+              {canonicalError && (
+                <div className="text-sm text-amber-700 dark:text-amber-300">
+                  {canonicalError}
+                </div>
+              )}
+              {canonical && !canonical.error && (
+                <div className="text-sm text-slate-600 dark:text-gray-400">
+                  Canonical target:{' '}
+                  {canonical.canonicalRecommendedTarget || 'none'}; move{' '}
+                  {humanBytes(canonical.canonicalMoveBytes || 0)}
+                </div>
+              )}
             </div>
           )}
         </div>

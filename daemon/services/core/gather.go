@@ -56,14 +56,21 @@ func (c *Core) gatherPlanStart(plan *domain.Plan) {
 
 	c.printDisks(c.state.Unraid.Disks, c.state.Unraid.BlockSize)
 
-	items, ownerIssue, groupIssue, folderIssue, fileIssue := c.getItemsAndIssues(c.state.Status, c.state.Unraid.BlockSize, reItems, reStat, c.state.Unraid.Disks, plan.ChosenFolders)
+	items := c.fillGatherPlan(plan, c.state.Unraid.Disks, c.state.Unraid.BlockSize)
 
-	// // no items found, no sense going on, just end this planning
-	// if len(items) == 0 {
-	// 	p.endPlan(state.Status, plan, state.Unraid.Disks, items, toBeTransferred)
-	// 	p.bus.Pub(&pubsub.Message{Payload: plan}, common.IntScatterPlanFinished)
-	// 	return
-	// }
+	c.endPlan(c.state.Status, plan, c.state.Unraid.Disks, items, make([]*domain.Item, 0))
+	// p.bus.Pub(&pubsub.Message{Payload: plan}, common.IntScatterPlanFinished)
+	c.gatherPlanEnd(plan)
+}
+
+// fillGatherPlan runs the canonical Gather discovery + Greedy fit loop used by
+// manual Gather. It mutates plan in place and returns the discovered items.
+// Callers that must remain read-only (Stage 3A) must not store pending plans,
+// create operations, or call gatherMove after this.
+func (c *Core) fillGatherPlan(plan *domain.Plan, disks []*domain.Disk, blockSize uint64) []*domain.Item {
+	items, ownerIssue, groupIssue, folderIssue, fileIssue := c.getItemsAndIssues(
+		c.state.Status, blockSize, reItems, reStat, disks, plan.ChosenFolders,
+	)
 
 	plan.OwnerIssue = ownerIssue
 	plan.GroupIssue = groupIssue
@@ -76,18 +83,17 @@ func (c *Core) gatherPlanStart(plan *domain.Plan) {
 		logger.Blue("gatherPlan:found(%s):size(%d)", filepath.Join(item.Location, item.Path), item.Size)
 
 		msg := fmt.Sprintf("Found %s (%s)", filepath.Join(item.Location, item.Path), lib.ByteSize(item.Size))
-		packet = &domain.Packet{Topic: common.EventGatherPlanProgress, Payload: msg}
+		packet := &domain.Packet{Topic: common.EventGatherPlanProgress, Payload: msg}
 		c.ctx.Hub.Pub(packet, "socket:broadcast")
 	}
 
 	logger.Blue("gatherPlan:issues:owner(%d),group(%d),folder(%d),file(%d)", plan.OwnerIssue, plan.GroupIssue, plan.FolderIssue, plan.FileIssue)
 
-	// Initialize fields
 	plan.BytesToTransfer = 0
 
-	for _, disk := range c.state.Unraid.Disks {
+	for _, disk := range disks {
 		msg := fmt.Sprintf("Trying to allocate items to %s ...", disk.Name)
-		packet = &domain.Packet{Topic: common.EventGatherPlanProgress, Payload: msg}
+		packet := &domain.Packet{Topic: common.EventGatherPlanProgress, Payload: msg}
 		c.ctx.Hub.Pub(packet, "socket:broadcast")
 		logger.Blue("gatherPlan:%s", msg)
 
@@ -96,9 +102,16 @@ func (c *Core) gatherPlanStart(plan *domain.Plan) {
 		ceil := lib.Max(common.ReservedSpace, reserved)
 		logger.Blue("gatherPlan:ItemsLeft(%d):ReservedSpace(%d)", len(items), ceil)
 
-		packer := algorithm.NewGreedy(disk, items, ceil, c.state.Unraid.BlockSize)
+		packer := algorithm.NewGreedy(disk, items, ceil, blockSize)
 		bin := packer.FitAll()
 		if bin != nil {
+			if plan.VDisks[disk.Path] == nil {
+				plan.VDisks[disk.Path] = &domain.VDisk{
+					Path:        disk.Path,
+					CurrentFree: disk.Free,
+					PlannedFree: disk.Free,
+				}
+			}
 			plan.VDisks[disk.Path].Bin = bin
 			plan.VDisks[disk.Path].PlannedFree -= bin.Size
 
@@ -106,9 +119,7 @@ func (c *Core) gatherPlanStart(plan *domain.Plan) {
 		}
 	}
 
-	c.endPlan(c.state.Status, plan, c.state.Unraid.Disks, items, make([]*domain.Item, 0))
-	// p.bus.Pub(&pubsub.Message{Payload: plan}, common.IntScatterPlanFinished)
-	c.gatherPlanEnd(plan)
+	return items
 }
 
 func (c *Core) gatherPlanEnd(plan *domain.Plan) {

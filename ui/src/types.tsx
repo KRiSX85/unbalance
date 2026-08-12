@@ -84,6 +84,39 @@ export interface AutoGatherScanResult {
   error?: string;
 }
 
+export interface AutoGatherCanonicalTarget {
+  diskName: string;
+  diskPath: string;
+  isPhysicalArrayDisk: boolean;
+  canonicalEligible: boolean;
+  ineligibleReason?: string;
+  canonicalBytesToMove: number;
+  canonicalCurrentBytesOnTarget: number;
+  canonicalItemCount: number;
+  freeBytes: number;
+  diskSizeBytes: number;
+  projectedFreeBytes: number;
+  projectedFreePercent: number;
+  meetsPreferredFreeFloor: boolean;
+  rawGatherBinPresent: boolean;
+}
+
+export interface AutoGatherCanonicalPlanResult {
+  showPath: string;
+  stage2RecommendedTarget?: string;
+  stage2EstimatedMoveBytes?: number;
+  stage2TargetStillCanonicalEligible: boolean;
+  canonicalRecommendedTarget?: string;
+  canonicalMoveBytes?: number;
+  canonicalProjectedFreeBytes?: number;
+  canonicalProjectedFreePercent?: number;
+  belowPreferredFreeFloor?: boolean;
+  canonicalItemCountTotal?: number;
+  canonicalTargets?: AutoGatherCanonicalTarget[];
+  noEligibleReason?: string;
+  error?: string;
+}
+
 export interface AuthStatus {
   enabled: boolean;
   configured: boolean;

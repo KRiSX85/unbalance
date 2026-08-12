@@ -112,6 +112,7 @@ func (s *Server) Start() error {
 	protected.GET("/locate/:route", s.locate)
 	protected.GET("/size/:route", s.size)
 	protected.GET("/auto-gather/scan", s.autoGatherScan)
+	protected.POST("/auto-gather/canonical-plan", s.autoGatherCanonicalPlan, s.requireCSRF)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -289,6 +290,20 @@ func (s *Server) getLog(c echo.Context) error {
 
 func (s *Server) autoGatherScan(c echo.Context) error {
 	return c.JSON(200, s.core.ScanAutoGather())
+}
+
+func (s *Server) autoGatherCanonicalPlan(c echo.Context) error {
+	var req domain.AutoGatherCanonicalPlanRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid canonical plan request")
+	}
+	result := s.core.PlanAutoGatherCanonical(req)
+	if result.Error != "" {
+		// Validation / busy errors are client-visible; still HTTP 200 with Error
+		// field so the Auto Gather UI can render the message inline.
+		return c.JSON(200, result)
+	}
+	return c.JSON(200, result)
 }
 
 func (s *Server) setTvLibraryPath(c echo.Context) error {

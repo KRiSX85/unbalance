@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -152,6 +152,23 @@ export class Api {
 
   static async scanAutoGather(): Promise<AutoGatherScanResult> {
     const response = await fetch(`${Api.host}/auto-gather/scan`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async planAutoGatherCanonical(payload: {
+    showPath: string;
+    stage2RecommendedTarget?: string;
+    stage2EstimatedMoveBytes?: number;
+  }): Promise<AutoGatherCanonicalPlanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/canonical-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
     if (!response.ok) {
       throw new Error(await response.text());
     }
