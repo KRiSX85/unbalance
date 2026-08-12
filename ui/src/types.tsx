@@ -56,6 +56,10 @@ export interface AutoGatherShow {
 
   recommendedTargetDisk?: string;
   moveRequiredBytes?: number;
+  projectedFreeBytes?: number;
+  projectedFreePercent?: number;
+  belowPreferredFreeFloor?: boolean;
+  minMovementAlternative?: AutoGatherTargetCandidate;
   gatherTargets?: AutoGatherTargetCandidate[];
   noEligibleReason?: string;
 }
@@ -67,7 +71,10 @@ export interface AutoGatherTargetCandidate {
   moveRequiredBytes: number;
   currentShowBytesOnTarget: number;
   freeBytes: number;
+  diskSizeBytes: number;
   projectedFreeBytes: number;
+  projectedFreePercent: number;
+  meetsPreferredFreeFloor: boolean;
 }
 
 export interface AutoGatherScanResult {

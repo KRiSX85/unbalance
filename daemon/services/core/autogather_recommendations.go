@@ -74,6 +74,21 @@ import (
 //
 // CACHE INVARIANT: Recommendation and cleanup candidates consume only disks
 // from autogather.PartitionDisks array collection / IsArrayDiskName.
+//
+// BALANCED POLICY: Eligibility is unchanged (Greedy + reserved space). Among
+// eligible targets, prefer those whose projected free percent remains at or
+// above PreferredProjectedFreePercent. If any such targets exist, recommend
+// the least-movement one (tie-break: higher projected free %, then disk name).
+// If none meet the floor, fall back to least-movement and flag
+// BelowPreferredFreeFloor. The absolute least-movement candidate is also
+// exposed when it differs from the Balanced recommendation.
+//
+// PROJECTED FREE: Uses the same mode as Greedy FitAll — disk.Free − bin.Size
+// in byte mode (BlockSize==0), or (BlocksFree − bin.BlocksUsed) × BlockSize
+// in block mode. Reserved space is not subtracted from projected free.
+
+// PreferredProjectedFreePercent is the named Balanced floor. Not yet a UI setting.
+const PreferredProjectedFreePercent = 10.0
 
 // addAutoGatherRecommendations enriches scan results with informational
 // Gather-target recommendations (split shows) and empty-folder cleanup
@@ -148,6 +163,7 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 				MoveRequiredBytes:        moveRequired,
 				CurrentShowBytesOnTarget: currentOnTarget,
 				FreeBytes:                d.Free,
+				DiskSizeBytes:            d.Size,
 			}
 
 			if bin == nil {
@@ -156,12 +172,13 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 					"insufficient free space after reserved-space requirement (%s reserved)",
 					lib.ByteSize(ceil),
 				)
-				cand.ProjectedFreeBytes = 0
 			} else {
 				cand.Eligible = true
-				if d.Free >= moveRequired {
-					cand.ProjectedFreeBytes = d.Free - moveRequired
+				cand.ProjectedFreeBytes = projectedFreeAfterMove(d, bin, blockSize)
+				if d.Size > 0 {
+					cand.ProjectedFreePercent = float64(cand.ProjectedFreeBytes) * 100 / float64(d.Size)
 				}
+				cand.MeetsPreferredFreeFloor = cand.ProjectedFreePercent >= PreferredProjectedFreePercent
 				eligible = append(eligible, cand)
 			}
 			candidates = append(candidates, cand)
@@ -174,14 +191,19 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 			continue
 		}
 
-		sort.SliceStable(eligible, func(i, j int) bool {
-			if eligible[i].MoveRequiredBytes != eligible[j].MoveRequiredBytes {
-				return eligible[i].MoveRequiredBytes < eligible[j].MoveRequiredBytes
-			}
-			return eligible[i].DiskName < eligible[j].DiskName
-		})
+		minMove := selectLeastMovement(eligible)
+		balanced, belowFloor := selectBalanced(eligible)
+		show.RecommendedTargetDisk = balanced.DiskName
+		show.MoveRequiredBytes = balanced.MoveRequiredBytes
+		show.ProjectedFreeBytes = balanced.ProjectedFreeBytes
+		show.ProjectedFreePercent = balanced.ProjectedFreePercent
+		show.BelowPreferredFreeFloor = belowFloor
+		if minMove.DiskName != balanced.DiskName {
+			alt := minMove
+			show.MinMovementAlternative = &alt
+		}
 
-		// Also present candidates with eligible first (least movement), then
+		// Present candidates with eligible first (least movement), then
 		// ineligible, for stable UI expansion.
 		sort.SliceStable(show.GatherTargets, func(i, j int) bool {
 			a, b := show.GatherTargets[i], show.GatherTargets[j]
@@ -192,13 +214,12 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 				if a.MoveRequiredBytes != b.MoveRequiredBytes {
 					return a.MoveRequiredBytes < b.MoveRequiredBytes
 				}
+				if a.ProjectedFreePercent != b.ProjectedFreePercent {
+					return a.ProjectedFreePercent > b.ProjectedFreePercent
+				}
 			}
 			return a.DiskName < b.DiskName
 		})
-
-		best := eligible[0]
-		show.RecommendedTargetDisk = best.DiskName
-		show.MoveRequiredBytes = best.MoveRequiredBytes
 	}
 
 	return scan
@@ -238,6 +259,53 @@ func buildAllFileGatherItems(show *domain.AutoGatherShow, blockSize uint64) ([]*
 		add(sd)
 	}
 	return items, total
+}
+
+// projectedFreeAfterMove uses the same accounting mode as canonical Greedy
+// eligibility: bytes when blockSize==0, blocks when blockSize>0. Reserved
+// space is an eligibility buffer only and is not subtracted from projected
+// free. Underflow / impossible values clamp to zero.
+func projectedFreeAfterMove(d *domain.Disk, bin *domain.Bin, blockSize uint64) uint64 {
+	if d == nil || bin == nil {
+		return 0
+	}
+	if blockSize > 0 {
+		if bin.BlocksUsed > d.BlocksFree {
+			return 0
+		}
+		return (d.BlocksFree - bin.BlocksUsed) * blockSize
+	}
+	if bin.Size > d.Free {
+		return 0
+	}
+	return d.Free - bin.Size
+}
+
+func selectLeastMovement(eligible []domain.AutoGatherTargetCandidate) domain.AutoGatherTargetCandidate {
+	sorted := append([]domain.AutoGatherTargetCandidate(nil), eligible...)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		if sorted[i].MoveRequiredBytes != sorted[j].MoveRequiredBytes {
+			return sorted[i].MoveRequiredBytes < sorted[j].MoveRequiredBytes
+		}
+		if sorted[i].ProjectedFreePercent != sorted[j].ProjectedFreePercent {
+			return sorted[i].ProjectedFreePercent > sorted[j].ProjectedFreePercent
+		}
+		return sorted[i].DiskName < sorted[j].DiskName
+	})
+	return sorted[0]
+}
+
+func selectBalanced(eligible []domain.AutoGatherTargetCandidate) (domain.AutoGatherTargetCandidate, bool) {
+	aboveFloor := make([]domain.AutoGatherTargetCandidate, 0, len(eligible))
+	for _, c := range eligible {
+		if c.MeetsPreferredFreeFloor {
+			aboveFloor = append(aboveFloor, c)
+		}
+	}
+	if len(aboveFloor) == 0 {
+		return selectLeastMovement(eligible), true
+	}
+	return selectLeastMovement(aboveFloor), false
 }
 
 func filterArrayCleanupCandidates(names []string) []string {

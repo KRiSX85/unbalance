@@ -39,8 +39,12 @@ type AutoGatherShow struct {
 	// normal gather pending plans, history entries, or operations.
 	RecommendedTargetDisk string                     `json:"recommendedTargetDisk,omitempty"`
 	MoveRequiredBytes     uint64                     `json:"moveRequiredBytes,omitempty"`
-	GatherTargets         []AutoGatherTargetCandidate `json:"gatherTargets,omitempty"`
-	NoEligibleReason      string                     `json:"noEligibleReason,omitempty"`
+	ProjectedFreeBytes    uint64                     `json:"projectedFreeBytes,omitempty"`
+	ProjectedFreePercent  float64                    `json:"projectedFreePercent,omitempty"`
+	BelowPreferredFreeFloor bool                     `json:"belowPreferredFreeFloor,omitempty"`
+	MinMovementAlternative  *AutoGatherTargetCandidate `json:"minMovementAlternative,omitempty"`
+	GatherTargets           []AutoGatherTargetCandidate `json:"gatherTargets,omitempty"`
+	NoEligibleReason        string                      `json:"noEligibleReason,omitempty"`
 }
 
 // AutoGatherTargetCandidate is one physical array destination evaluation for a
@@ -49,13 +53,16 @@ type AutoGatherShow struct {
 // aggregates. Move figures are estimates: per-disk aggregation and Stage 1
 // TotalBytes are not guaranteed bit-identical to getItems()/du -bs.
 type AutoGatherTargetCandidate struct {
-	DiskName                 string `json:"diskName"`
-	Eligible                 bool   `json:"eligible"`
-	IneligibleReason         string `json:"ineligibleReason,omitempty"`
-	MoveRequiredBytes        uint64 `json:"moveRequiredBytes"`
-	CurrentShowBytesOnTarget uint64 `json:"currentShowBytesOnTarget"`
-	FreeBytes                uint64 `json:"freeBytes"`
-	ProjectedFreeBytes       uint64 `json:"projectedFreeBytes"`
+	DiskName                 string  `json:"diskName"`
+	Eligible                 bool    `json:"eligible"`
+	IneligibleReason         string  `json:"ineligibleReason,omitempty"`
+	MoveRequiredBytes        uint64  `json:"moveRequiredBytes"`
+	CurrentShowBytesOnTarget uint64  `json:"currentShowBytesOnTarget"`
+	FreeBytes                uint64  `json:"freeBytes"`
+	DiskSizeBytes            uint64  `json:"diskSizeBytes"`
+	ProjectedFreeBytes       uint64  `json:"projectedFreeBytes"`
+	ProjectedFreePercent     float64 `json:"projectedFreePercent"`
+	MeetsPreferredFreeFloor  bool    `json:"meetsPreferredFreeFloor"`
 }
 
 // AutoGatherScanResult is the read-only collection-wide scanner payload.

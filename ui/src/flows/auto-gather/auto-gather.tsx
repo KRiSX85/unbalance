@@ -181,9 +181,30 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
                 Estimated move: {humanBytes(show.moveRequiredBytes || 0)}
               </div>
               <div className="text-sm text-slate-600 dark:text-gray-400">
+                Projected free:{' '}
+                {humanBytes(show.projectedFreeBytes || 0)} (
+                {(show.projectedFreePercent || 0).toFixed(1)}%)
+              </div>
+              <div className="text-sm text-slate-600 dark:text-gray-400">
                 Current show data on target:{' '}
                 {humanBytes(currentOnRecommended || 0)}
               </div>
+              {show.belowPreferredFreeFloor && (
+                <div className="text-sm text-amber-700 dark:text-amber-300">
+                  Below the preferred 10% free-space floor; no eligible target
+                  would remain at or above 10% free.
+                </div>
+              )}
+              {show.minMovementAlternative && (
+                <div className="text-sm text-slate-600 dark:text-gray-400">
+                  Minimum-movement alternative:{' '}
+                  {show.minMovementAlternative.diskName} —{' '}
+                  {humanBytes(show.minMovementAlternative.moveRequiredBytes)}{' '}
+                  move, {humanBytes(show.minMovementAlternative.projectedFreeBytes)}{' '}
+                  projected free (
+                  {show.minMovementAlternative.projectedFreePercent.toFixed(1)}%)
+                </div>
+              )}
               <button
                 type="button"
                 className="mt-2 text-xs text-slate-600 dark:text-gray-400 underline"
@@ -194,7 +215,13 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
               </button>
               {expanded && (show.gatherTargets?.length || 0) > 0 && (
                 <div className="mt-2 space-y-2">
-                  {show.gatherTargets!.map((t) => (
+                  {show.gatherTargets!.map((t) => {
+                    const isRecommended =
+                      t.diskName === show.recommendedTargetDisk;
+                    const isMinMovement =
+                      !!show.minMovementAlternative &&
+                      t.diskName === show.minMovementAlternative.diskName;
+                    return (
                     <div
                       key={t.diskName}
                       className="border border-slate-200 dark:border-gray-800 rounded px-2 py-2"
@@ -210,6 +237,16 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
                         >
                           ({t.eligible ? 'eligible' : 'not eligible'})
                         </span>
+                        {isRecommended && (
+                          <span className="ml-2 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                            Recommended
+                          </span>
+                        )}
+                        {isMinMovement && (
+                          <span className="ml-2 text-xs font-semibold text-slate-600 dark:text-gray-400">
+                            Minimum movement
+                          </span>
+                        )}
                       </div>
                       <div className="text-sm text-slate-600 dark:text-gray-400">
                         Estimated all-file bytes to move:{' '}
@@ -219,7 +256,7 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
                       <div className="text-sm text-slate-600 dark:text-gray-400">
                         Free: {humanBytes(t.freeBytes)}; Projected free:{' '}
                         {t.eligible
-                          ? humanBytes(t.projectedFreeBytes)
+                          ? `${humanBytes(t.projectedFreeBytes)} (${t.projectedFreePercent.toFixed(1)}%)`
                           : 'n/a'}
                       </div>
                       {!t.eligible && t.ineligibleReason && (
@@ -228,7 +265,8 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
                         </div>
                       )}
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </>
