@@ -37,12 +37,12 @@ type AutoGatherShow struct {
 	// Recommendation fields are derived from split-show all-file scan stats and
 	// current array free space. Stage 2 is informational only and never creates
 	// normal gather pending plans, history entries, or operations.
-	RecommendedTargetDisk string                     `json:"recommendedTargetDisk,omitempty"`
-	MoveRequiredBytes     uint64                     `json:"moveRequiredBytes,omitempty"`
-	ProjectedFreeBytes    uint64                     `json:"projectedFreeBytes,omitempty"`
-	ProjectedFreePercent  float64                    `json:"projectedFreePercent,omitempty"`
-	BelowPreferredFreeFloor bool                     `json:"belowPreferredFreeFloor,omitempty"`
-	MinMovementAlternative  *AutoGatherTargetCandidate `json:"minMovementAlternative,omitempty"`
+	RecommendedTargetDisk   string                      `json:"recommendedTargetDisk,omitempty"`
+	MoveRequiredBytes       uint64                      `json:"moveRequiredBytes,omitempty"`
+	ProjectedFreeBytes      uint64                      `json:"projectedFreeBytes,omitempty"`
+	ProjectedFreePercent    float64                     `json:"projectedFreePercent,omitempty"`
+	BelowPreferredFreeFloor bool                        `json:"belowPreferredFreeFloor,omitempty"`
+	MinMovementAlternative  *AutoGatherTargetCandidate  `json:"minMovementAlternative,omitempty"`
 	GatherTargets           []AutoGatherTargetCandidate `json:"gatherTargets,omitempty"`
 	NoEligibleReason        string                      `json:"noEligibleReason,omitempty"`
 }
@@ -71,6 +71,9 @@ type AutoGatherScanResult struct {
 	Shows       []AutoGatherShow `json:"shows"`
 	Warnings    []string         `json:"warnings,omitempty"`
 	Error       string           `json:"error,omitempty"`
+	// Cancelled is set when a Stage 3B cooperative Stop aborted the scan.
+	// It is distinct from Error (planner/filesystem failure).
+	Cancelled bool `json:"cancelled,omitempty"`
 }
 
 // Auto Gather show status values.
@@ -93,36 +96,82 @@ type AutoGatherCanonicalPlanRequest struct {
 // AutoGatherCanonicalTarget is one destination evaluation from canonical Gather
 // planning (real getItems/du + Greedy), with Auto Gather array-only eligibility.
 type AutoGatherCanonicalTarget struct {
-	DiskName                   string  `json:"diskName"`
-	DiskPath                   string  `json:"diskPath"`
-	IsPhysicalArrayDisk        bool    `json:"isPhysicalArrayDisk"`
-	CanonicalEligible          bool    `json:"canonicalEligible"`
-	IneligibleReason           string  `json:"ineligibleReason,omitempty"`
-	CanonicalBytesToMove       uint64  `json:"canonicalBytesToMove"`
-	CanonicalCurrentBytesOnTarget uint64 `json:"canonicalCurrentBytesOnTarget"`
-	CanonicalItemCount         int     `json:"canonicalItemCount"`
-	FreeBytes                  uint64  `json:"freeBytes"`
-	DiskSizeBytes              uint64  `json:"diskSizeBytes"`
-	ProjectedFreeBytes         uint64  `json:"projectedFreeBytes"`
-	ProjectedFreePercent       float64 `json:"projectedFreePercent"`
-	MeetsPreferredFreeFloor    bool    `json:"meetsPreferredFreeFloor"`
-	RawGatherBinPresent        bool    `json:"rawGatherBinPresent"`
+	DiskName                      string  `json:"diskName"`
+	DiskPath                      string  `json:"diskPath"`
+	IsPhysicalArrayDisk           bool    `json:"isPhysicalArrayDisk"`
+	CanonicalEligible             bool    `json:"canonicalEligible"`
+	IneligibleReason              string  `json:"ineligibleReason,omitempty"`
+	CanonicalBytesToMove          uint64  `json:"canonicalBytesToMove"`
+	CanonicalCurrentBytesOnTarget uint64  `json:"canonicalCurrentBytesOnTarget"`
+	CanonicalItemCount            int     `json:"canonicalItemCount"`
+	FreeBytes                     uint64  `json:"freeBytes"`
+	DiskSizeBytes                 uint64  `json:"diskSizeBytes"`
+	ProjectedFreeBytes            uint64  `json:"projectedFreeBytes"`
+	ProjectedFreePercent          float64 `json:"projectedFreePercent"`
+	MeetsPreferredFreeFloor       bool    `json:"meetsPreferredFreeFloor"`
+	RawGatherBinPresent           bool    `json:"rawGatherBinPresent"`
 }
 
 // AutoGatherCanonicalPlanResult compares Stage 2 advisory recommendation with
 // a fresh canonical Gather plan for exactly one show. Stage 3A never executes.
 type AutoGatherCanonicalPlanResult struct {
-	ShowPath                         string                      `json:"showPath"`
-	Stage2RecommendedTarget          string                      `json:"stage2RecommendedTarget,omitempty"`
-	Stage2EstimatedMoveBytes         uint64                      `json:"stage2EstimatedMoveBytes,omitempty"`
-	Stage2TargetStillCanonicalEligible bool                      `json:"stage2TargetStillCanonicalEligible"`
-	CanonicalRecommendedTarget       string                      `json:"canonicalRecommendedTarget,omitempty"`
-	CanonicalMoveBytes               uint64                      `json:"canonicalMoveBytes,omitempty"`
-	CanonicalProjectedFreeBytes      uint64                      `json:"canonicalProjectedFreeBytes,omitempty"`
-	CanonicalProjectedFreePercent    float64                     `json:"canonicalProjectedFreePercent,omitempty"`
-	BelowPreferredFreeFloor          bool                        `json:"belowPreferredFreeFloor,omitempty"`
-	CanonicalItemCountTotal          int                         `json:"canonicalItemCountTotal,omitempty"`
-	CanonicalTargets                 []AutoGatherCanonicalTarget `json:"canonicalTargets,omitempty"`
-	NoEligibleReason                 string                      `json:"noEligibleReason,omitempty"`
-	Error                            string                      `json:"error,omitempty"`
+	ShowPath                           string                      `json:"showPath"`
+	Stage2RecommendedTarget            string                      `json:"stage2RecommendedTarget,omitempty"`
+	Stage2EstimatedMoveBytes           uint64                      `json:"stage2EstimatedMoveBytes,omitempty"`
+	Stage2TargetStillCanonicalEligible bool                        `json:"stage2TargetStillCanonicalEligible"`
+	CanonicalRecommendedTarget         string                      `json:"canonicalRecommendedTarget,omitempty"`
+	CanonicalMoveBytes                 uint64                      `json:"canonicalMoveBytes,omitempty"`
+	CanonicalProjectedFreeBytes        uint64                      `json:"canonicalProjectedFreeBytes,omitempty"`
+	CanonicalProjectedFreePercent      float64                     `json:"canonicalProjectedFreePercent,omitempty"`
+	BelowPreferredFreeFloor            bool                        `json:"belowPreferredFreeFloor,omitempty"`
+	CanonicalItemCountTotal            int                         `json:"canonicalItemCountTotal,omitempty"`
+	CanonicalTargets                   []AutoGatherCanonicalTarget `json:"canonicalTargets,omitempty"`
+	NoEligibleReason                   string                      `json:"noEligibleReason,omitempty"`
+	Error                              string                      `json:"error,omitempty"`
+	// Cancelled is set when a Stage 3B cooperative Stop aborted canonical planning.
+	// It is distinct from Error and NoEligibleReason.
+	Cancelled bool `json:"cancelled,omitempty"`
+}
+
+// Auto Gather dry-run orchestration (Stage 3B) phase values.
+const (
+	AutoGatherDryRunPhaseIdle      = "idle"
+	AutoGatherDryRunPhaseRunning   = "running"
+	AutoGatherDryRunPhaseStopping  = "stopping"
+	AutoGatherDryRunPhaseStopped   = "stopped"
+	AutoGatherDryRunPhaseFailed    = "failed"
+	AutoGatherDryRunPhaseCompleted = "completed"
+)
+
+// AutoGatherDryRunShowRecord records one show handled during a Stage 3B run.
+type AutoGatherDryRunShowRecord struct {
+	ShowPath                string `json:"showPath"`
+	ShowName                string `json:"showName,omitempty"`
+	TargetDisk              string `json:"targetDisk,omitempty"`
+	MoveBytes               uint64 `json:"moveBytes,omitempty"`
+	BelowPreferredFreeFloor bool   `json:"belowPreferredFreeFloor,omitempty"`
+	Reason                  string `json:"reason,omitempty"`
+	At                      string `json:"at,omitempty"`
+}
+
+// AutoGatherDryRunState is the in-memory Stage 3B orchestration status.
+// One Stage 1 library scan is retained for the run; later iterations refresh
+// Unraid disk state and re-score Stage 2 without rescanning the TV library.
+type AutoGatherDryRunState struct {
+	Phase                string                       `json:"phase"`
+	DryRun               bool                         `json:"dryRun"`
+	CurrentShow          string                       `json:"currentShow,omitempty"`
+	CurrentShowName      string                       `json:"currentShowName,omitempty"`
+	CurrentTarget        string                       `json:"currentTarget,omitempty"`
+	Completed            []AutoGatherDryRunShowRecord `json:"completed,omitempty"`
+	Skipped              []AutoGatherDryRunShowRecord `json:"skipped,omitempty"`
+	FailedShow           string                       `json:"failedShow,omitempty"`
+	FailedShowName       string                       `json:"failedShowName,omitempty"`
+	FailureReason        string                       `json:"failureReason,omitempty"`
+	StartedAt            string                       `json:"startedAt,omitempty"`
+	EndedAt              string                       `json:"endedAt,omitempty"`
+	IterationsConsidered int                          `json:"iterationsConsidered"`
+	SplitRemaining       int                          `json:"splitRemaining,omitempty"`
+	Message              string                       `json:"message,omitempty"`
+	Error                string                       `json:"error,omitempty"`
 }

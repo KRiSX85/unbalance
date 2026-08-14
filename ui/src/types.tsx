@@ -6,6 +6,7 @@ export enum Op {
   ScatterValidate = 4,
   GatherPlan = 5,
   GatherMove = 6,
+  AutoGatherDryRun = 7,
 }
 
 export type Step = 'idle' | 'select' | 'plan' | 'transfer';
@@ -82,6 +83,7 @@ export interface AutoGatherScanResult {
   shows: AutoGatherShow[];
   warnings?: string[];
   error?: string;
+  cancelled?: boolean;
 }
 
 export interface AutoGatherCanonicalTarget {
@@ -114,6 +116,36 @@ export interface AutoGatherCanonicalPlanResult {
   canonicalItemCountTotal?: number;
   canonicalTargets?: AutoGatherCanonicalTarget[];
   noEligibleReason?: string;
+  error?: string;
+  cancelled?: boolean;
+}
+
+export interface AutoGatherDryRunShowRecord {
+  showPath: string;
+  showName?: string;
+  targetDisk?: string;
+  moveBytes?: number;
+  belowPreferredFreeFloor?: boolean;
+  reason?: string;
+  at?: string;
+}
+
+export interface AutoGatherDryRunState {
+  phase: string;
+  dryRun: boolean;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  completed?: AutoGatherDryRunShowRecord[];
+  skipped?: AutoGatherDryRunShowRecord[];
+  failedShow?: string;
+  failedShowName?: string;
+  failureReason?: string;
+  startedAt?: string;
+  endedAt?: string;
+  iterationsConsidered?: number;
+  splitRemaining?: number;
+  message?: string;
   error?: string;
 }
 

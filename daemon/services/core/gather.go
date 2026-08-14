@@ -22,6 +22,10 @@ func (c *Core) gatherPlanPrepare(setup domain.GatherSetup) {
 		logger.Yellow("unbalanced is busy: %d", c.state.Status)
 		return
 	}
+	if c.isAutoGatherDryRunActive() {
+		logger.Yellow("manual gather blocked while Auto Gather dry-run is active")
+		return
+	}
 
 	c.state.Status = common.OpGatherPlan
 	c.state.Unraid = c.refreshUnraid()
@@ -68,14 +72,26 @@ func (c *Core) gatherPlanStart(plan *domain.Plan) {
 // Callers that must remain read-only (Stage 3A) must not store pending plans,
 // create operations, or call gatherMove after this.
 func (c *Core) fillGatherPlan(plan *domain.Plan, disks []*domain.Disk, blockSize uint64) []*domain.Item {
-	items, ownerIssue, groupIssue, folderIssue, fileIssue := c.getItemsAndIssues(
-		c.state.Status, blockSize, reItems, reStat, disks, plan.ChosenFolders,
+	items, _ := c.fillGatherPlanCancellable(plan, disks, blockSize, nil)
+	return items
+}
+
+// fillGatherPlanCancellable is fillGatherPlan with an optional Stage-3B-only
+// cancellation callback. shouldStop nil preserves historical behaviour.
+// When cancelled, plan may be partially populated and must not be executed.
+func (c *Core) fillGatherPlanCancellable(plan *domain.Plan, disks []*domain.Disk, blockSize uint64, shouldStop func() bool) ([]*domain.Item, bool) {
+	items, ownerIssue, groupIssue, folderIssue, fileIssue, cancelled := c.getItemsAndIssuesCancellable(
+		c.state.Status, blockSize, reItems, reStat, disks, plan.ChosenFolders, shouldStop,
 	)
 
 	plan.OwnerIssue = ownerIssue
 	plan.GroupIssue = groupIssue
 	plan.FolderIssue = folderIssue
 	plan.FileIssue = fileIssue
+
+	if cancelled {
+		return items, true
+	}
 
 	logger.Blue("gatherPlan:items(%d)", len(items))
 
@@ -92,6 +108,10 @@ func (c *Core) fillGatherPlan(plan *domain.Plan, disks []*domain.Disk, blockSize
 	plan.BytesToTransfer = 0
 
 	for _, disk := range disks {
+		if shouldStop != nil && shouldStop() {
+			return items, true
+		}
+
 		msg := fmt.Sprintf("Trying to allocate items to %s ...", disk.Name)
 		packet := &domain.Packet{Topic: common.EventGatherPlanProgress, Payload: msg}
 		c.ctx.Hub.Pub(packet, "socket:broadcast")
@@ -119,7 +139,7 @@ func (c *Core) fillGatherPlan(plan *domain.Plan, disks []*domain.Disk, blockSize
 		}
 	}
 
-	return items
+	return items, false
 }
 
 func (c *Core) gatherPlanEnd(plan *domain.Plan) {
@@ -175,7 +195,7 @@ func (c *Core) createGatherOperation(plan domain.Plan) *domain.Operation {
 	operation := &domain.Operation{
 		ID:     shortid.MustGenerate(),
 		OpKind: c.state.Status,
-		DryRun: c.ctx.DryRun,
+		DryRun: c.ctx.DryRun || c.autoGatherDryRunExec,
 	}
 
 	operation.RsyncArgs = append([]string{common.RsyncArgs}, c.ctx.RsyncArgs...)

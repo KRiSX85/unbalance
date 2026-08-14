@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -168,6 +168,41 @@ export class Api {
       headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
       credentials: 'same-origin',
       body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async startAutoGatherDryRun(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || (await response.text()));
+    }
+    return response.json();
+  }
+
+  static async stopAutoGatherDryRun(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherDryRunStatus(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/status`, {
+      credentials: 'same-origin',
     });
     if (!response.ok) {
       throw new Error(await response.text());

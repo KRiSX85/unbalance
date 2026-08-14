@@ -14,6 +14,8 @@ export function getRouteFromStatus(status: Op): string {
       return '/scatter/transfer/operation';
     case Op.GatherMove:
       return '/gather/transfer/operation';
+    case Op.AutoGatherDryRun:
+      return '/auto-gather';
     default:
       return '/scatter/select';
   }

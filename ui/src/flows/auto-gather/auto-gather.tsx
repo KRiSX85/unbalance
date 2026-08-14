@@ -6,6 +6,7 @@ import { useToast } from '@/components/ui/use-toast';
 
 import {
   useConfigActions,
+  useConfigDryRun,
   useConfigTvLibraryPath,
 } from '~/state/config';
 import {
@@ -14,10 +15,14 @@ import {
   useAutoGatherResult,
   useAutoGatherScanning,
 } from '~/state/auto-gather';
-import { AutoGatherCanonicalPlanResult, AutoGatherShow } from '~/types';
+import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
+import {
+  isAutoGatherStopEnabled,
+} from '~/helpers/auto-gather-ui';
 import { Icon } from '~/shared/icons/icon';
 import { Api } from '~/api';
+import { useUnraidActions } from '~/state/unraid';
 
 type ShowFilter =
   | 'attention'
@@ -419,16 +424,84 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
 
 export const AutoGather: React.FunctionComponent = () => {
   const tvLibraryPath = useConfigTvLibraryPath();
+  const globalDryRun = useConfigDryRun();
   const { setTvLibraryPath } = useConfigActions();
   const { scan } = useAutoGatherActions();
   const scanning = useAutoGatherScanning();
   const result = useAutoGatherResult();
   const error = useAutoGatherError();
   const { toast } = useToast();
+  const { syncAutoGatherDryRun } = useUnraidActions();
 
   const [pathValue, setPathValue] = React.useState(tvLibraryPath);
   const [filter, setFilter] = React.useState<ShowFilter>('attention');
   const [saving, setSaving] = React.useState(false);
+  const [dryRunState, setDryRunState] = React.useState<AutoGatherDryRunState | null>(null);
+  const [dryRunBusy, setDryRunBusy] = React.useState(false);
+
+  const refreshDryRunStatus = React.useCallback(async () => {
+    try {
+      const status = await Api.getAutoGatherDryRunStatus();
+      setDryRunState(status);
+    } catch {
+      // ignore transient poll errors
+    }
+  }, []);
+
+  React.useEffect(() => {
+    void refreshDryRunStatus();
+  }, [refreshDryRunStatus]);
+
+  React.useEffect(() => {
+    const phase = dryRunState?.phase;
+    if (phase !== 'running' && phase !== 'stopping') {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void refreshDryRunStatus();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [dryRunState?.phase, refreshDryRunStatus]);
+
+  const onStartDryRun = async () => {
+    setDryRunBusy(true);
+    try {
+      const state = await Api.startAutoGatherDryRun();
+      setDryRunState(state);
+      if (state.error) {
+        toast({ title: state.error, variant: 'destructive' });
+      } else {
+        syncAutoGatherDryRun(true);
+        toast({
+          title: 'Dry-run Auto Gather started',
+          description: 'No files will be transferred or deleted.',
+        });
+      }
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to start dry-run',
+        variant: 'destructive',
+      });
+    } finally {
+      setDryRunBusy(false);
+    }
+  };
+
+  const onStopDryRun = async () => {
+    setDryRunBusy(true);
+    try {
+      const state = await Api.stopAutoGatherDryRun();
+      setDryRunState(state);
+      toast({ title: 'Dry-run Auto Gather stop requested' });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to stop dry-run',
+        variant: 'destructive',
+      });
+    } finally {
+      setDryRunBusy(false);
+    }
+  };
 
   React.useEffect(() => {
     setPathValue(tvLibraryPath);
@@ -479,6 +552,13 @@ export const AutoGather: React.FunctionComponent = () => {
     0,
   );
   const warnings = result?.warnings ?? [];
+  const dryRunPhase = dryRunState?.phase ?? 'idle';
+  const dryRunActive = dryRunPhase === 'running' || dryRunPhase === 'stopping';
+  const stopEnabled = isAutoGatherStopEnabled(dryRunPhase);
+
+  React.useEffect(() => {
+    syncAutoGatherDryRun(dryRunActive);
+  }, [dryRunActive, syncAutoGatherDryRun]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-100 dark:bg-gray-950">
@@ -487,9 +567,79 @@ export const AutoGather: React.FunctionComponent = () => {
           Auto Gather
         </h1>
         <p className="text-sm text-slate-500 dark:text-gray-500 mt-1">
-          Read-only scan and destination recommendations. No planning tickets,
-          transfers, or deletions in this stage.
+          Read-only scan and destination recommendations. Stage 3B dry-run
+          orchestration exercises Gather planning without transferring or
+          deleting files.
         </p>
+
+        <div className="mt-4 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3">
+          <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
+            Dry-run Auto Gather (Stage 3B — not a real move)
+          </div>
+          <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
+            One Stage 1 library scan at start, then each iteration refreshes
+            Unraid disk state, re-scores Stage 2 from the retained inventory,
+            canonical-plans only the selected show, and invokes Gather with{' '}
+            <code>--dry-run</code>. Dry-run does not change disk free space or
+            show placement, so free-space adaptation cannot be proven until
+            real moves.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <Button
+              variant="secondary"
+              disabled={!globalDryRun || dryRunBusy || dryRunActive}
+              onClick={() => void onStartDryRun()}
+            >
+              Start dry run
+            </Button>
+            <Button
+              variant="outline"
+              disabled={!stopEnabled}
+              onClick={() => void onStopDryRun()}
+            >
+              Stop
+            </Button>
+          </div>
+          {!globalDryRun && (
+            <p className="text-xs text-amber-800 dark:text-amber-300 mt-2">
+              Enable global dry-run mode before starting Stage 3B.
+            </p>
+          )}
+          <div className="mt-3 text-sm text-amber-900 dark:text-amber-100 space-y-1">
+            <div>
+              Status: <span className="font-medium">{dryRunPhase}</span>
+            </div>
+            {(dryRunState?.currentShowName || dryRunState?.currentShow) && (
+              <div>
+                Current show:{' '}
+                {dryRunState?.currentShowName || dryRunState?.currentShow}
+                {dryRunState?.currentTarget
+                  ? ` → ${dryRunState.currentTarget}`
+                  : ''}
+              </div>
+            )}
+            <div>
+              Completed: {dryRunState?.completed?.length ?? 0}; Skipped:{' '}
+              {dryRunState?.skipped?.length ?? 0}
+              {typeof dryRunState?.splitRemaining === 'number' &&
+                `; Split remaining: ${dryRunState.splitRemaining}`}
+            </div>
+            {dryRunState?.failureReason && (
+              <div className="text-amber-800 dark:text-amber-300">
+                Failure
+                {dryRunState.failedShowName
+                  ? ` (${dryRunState.failedShowName})`
+                  : ''}
+                : {dryRunState.failureReason}
+              </div>
+            )}
+            {dryRunState?.message && (
+              <div className="text-xs text-amber-800 dark:text-amber-300">
+                {dryRunState.message}
+              </div>
+            )}
+          </div>
+        </div>
 
         <div className="flex flex-row flex-wrap items-center gap-2 mt-4">
           <span className="text-sm text-slate-500 dark:text-gray-500">
@@ -500,15 +650,16 @@ export const AutoGather: React.FunctionComponent = () => {
             value={pathValue}
             onChange={(e) => setPathValue(e.target.value)}
             placeholder="data/media/tv"
+            disabled={dryRunActive}
           />
           <Button
             variant="secondary"
             onClick={() => void onSavePath()}
-            disabled={saving}
+            disabled={saving || dryRunActive}
           >
             {saving ? 'Saving…' : 'Save path'}
           </Button>
-          <Button onClick={() => void onScan()} disabled={scanning}>
+          <Button onClick={() => void onScan()} disabled={scanning || dryRunActive}>
             {scanning ? 'Scanning…' : 'Scan library'}
           </Button>
           {scanning && (

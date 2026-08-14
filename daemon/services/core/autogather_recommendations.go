@@ -92,8 +92,18 @@ const PreferredProjectedFreePercent = 10.0
 
 // addAutoGatherRecommendations enriches scan results with informational
 // Gather-target recommendations (split shows) and empty-folder cleanup
-// reporting (split and consolidated). It is purely read-only.
+// reporting (split and consolidated). It is purely read-only with respect to
+// media, but it mutates recommendation fields on the returned show DTOs.
+// Callers that reuse a Stage 1 discovery snapshot across iterations must pass a
+// clone (see cloneAutoGatherDiscoverySnapshot) so derived values from a previous
+// enrichment cannot leak into the next.
 func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+	return c.addAutoGatherRecommendationsCancellable(scan, unraid, nil)
+}
+
+// addAutoGatherRecommendationsCancellable checks shouldStop between shows when
+// provided (Stage 3B only). shouldStop nil preserves ordinary scan behaviour.
+func (c *Core) addAutoGatherRecommendationsCancellable(scan domain.AutoGatherScanResult, unraid *domain.Unraid, shouldStop func() bool) domain.AutoGatherScanResult {
 	if unraid == nil || len(unraid.Disks) == 0 {
 		return scan
 	}
@@ -114,7 +124,13 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 	blockSize := unraid.BlockSize
 
 	for i := range scan.Shows {
+		if shouldStop != nil && shouldStop() {
+			scan.Cancelled = true
+			return scan
+		}
+
 		show := &scan.Shows[i]
+		clearAutoGatherDerivedRecommendationFields(show)
 
 		// Cleanup candidates are already populated from Stage 1 empty-folder
 		// array presences. Re-assert the array-disk invariant defensively.
@@ -223,6 +239,48 @@ func (c *Core) addAutoGatherRecommendations(scan domain.AutoGatherScanResult, un
 	}
 
 	return scan
+}
+
+// clearAutoGatherDerivedRecommendationFields removes Stage 2 derived fields so
+// a repeated enrichment from the same Stage 1 discovery snapshot cannot keep a
+// stale recommended target / move estimate from a previous disk-state snapshot.
+func clearAutoGatherDerivedRecommendationFields(show *domain.AutoGatherShow) {
+	if show == nil {
+		return
+	}
+	show.RecommendedTargetDisk = ""
+	show.MoveRequiredBytes = 0
+	show.ProjectedFreeBytes = 0
+	show.ProjectedFreePercent = 0
+	show.BelowPreferredFreeFloor = false
+	show.MinMovementAlternative = nil
+	show.GatherTargets = nil
+	show.NoEligibleReason = ""
+}
+
+// cloneAutoGatherDiscoverySnapshot copies Stage 1 discovery data and clears any
+// Stage 2 recommendation fields. Used by Stage 3B to retain one library scan
+// for the run lifetime while re-scoring from fresh disk state each iteration.
+func cloneAutoGatherDiscoverySnapshot(src domain.AutoGatherScanResult) domain.AutoGatherScanResult {
+	out := domain.AutoGatherScanResult{
+		LibraryPath: src.LibraryPath,
+		Shows:       make([]domain.AutoGatherShow, len(src.Shows)),
+		Warnings:    append([]string(nil), src.Warnings...),
+		Error:       src.Error,
+		Cancelled:   src.Cancelled,
+	}
+	for i := range src.Shows {
+		show := src.Shows[i]
+		show.VideoDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].VideoDisks...)
+		show.SidecarOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].SidecarOnlyDisks...)
+		show.EmptyOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].EmptyOnlyDisks...)
+		show.CachePoolsWithVideo = append([]string(nil), src.Shows[i].CachePoolsWithVideo...)
+		show.CleanupCandidateDisks = append([]string(nil), src.Shows[i].CleanupCandidateDisks...)
+		clearAutoGatherDerivedRecommendationFields(&show)
+		show.CleanupCandidateCount = len(show.CleanupCandidateDisks)
+		out.Shows[i] = show
+	}
+	return out
 }
 
 // buildAllFileGatherItems creates one synthetic Item per physical array disk

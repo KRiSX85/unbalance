@@ -61,6 +61,35 @@ func (c *Core) planAutoGatherCanonical(req domain.AutoGatherCanonicalPlanRequest
 	if refreshDisks {
 		c.state.Unraid = c.refreshUnraid()
 	}
+
+	result = c.buildCanonicalPlanResult(showPath, req.Stage2RecommendedTarget, req.Stage2EstimatedMoveBytes)
+
+	if len(c.pendingPlans) != pendingBefore {
+		result.Error = "internal error: canonical planning created a pending Gather ticket"
+	}
+	return result
+}
+
+// buildCanonicalPlanResult runs canonical Gather planning for one show without
+// storing a pending ticket. Caller controls Status/Unraid refresh.
+func (c *Core) buildCanonicalPlanResult(showPath, stage2Target string, stage2Move uint64) domain.AutoGatherCanonicalPlanResult {
+	return c.buildCanonicalPlanResultCancellable(showPath, stage2Target, stage2Move, nil)
+}
+
+// buildCanonicalPlanResultCancellable is the Stage-3B-aware variant. shouldStop
+// nil preserves Stage 3A / read-only behaviour.
+func (c *Core) buildCanonicalPlanResultCancellable(showPath, stage2Target string, stage2Move uint64, shouldStop func() bool) domain.AutoGatherCanonicalPlanResult {
+	result := domain.AutoGatherCanonicalPlanResult{
+		ShowPath:                 showPath,
+		Stage2RecommendedTarget:  stage2Target,
+		Stage2EstimatedMoveBytes: stage2Move,
+	}
+
+	if shouldStop != nil && shouldStop() {
+		result.Cancelled = true
+		return result
+	}
+
 	if c.state.Unraid == nil || len(c.state.Unraid.Disks) == 0 {
 		result.Error = "unable to read array disks"
 		return result
@@ -83,20 +112,18 @@ func (c *Core) planAutoGatherCanonical(req domain.AutoGatherCanonicalPlanRequest
 		}
 	}
 
-	items := c.fillGatherPlan(plan, c.state.Unraid.Disks, c.state.Unraid.BlockSize)
-	result = assembleAutoGatherCanonicalResult(
+	items, cancelled := c.fillGatherPlanCancellable(plan, c.state.Unraid.Disks, c.state.Unraid.BlockSize, shouldStop)
+	if cancelled {
+		result.Cancelled = true
+		return result
+	}
+	return assembleAutoGatherCanonicalResult(
 		result,
 		plan,
 		c.state.Unraid.Disks,
 		items,
 		c.state.Unraid.BlockSize,
 	)
-
-	// Stage 3A must never retain an executable pending Gather ticket.
-	if len(c.pendingPlans) != pendingBefore {
-		result.Error = "internal error: canonical planning created a pending Gather ticket"
-	}
-	return result
 }
 
 func validateAutoGatherCanonicalSelection(selected []string) (string, error) {

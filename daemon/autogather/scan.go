@@ -214,6 +214,14 @@ func classifyShow(
 // cacheDisks are scanned solely for "Waiting for Mover" detection and must never
 // be treated as destination-capable array disks.
 func ScanLibrary(libraryRel string, arrayDisks, cacheDisks []DiskRef) domain.AutoGatherScanResult {
+	return ScanLibraryWithCancel(libraryRel, arrayDisks, cacheDisks, nil)
+}
+
+// ScanLibraryWithCancel is ScanLibrary with an optional cooperative cancellation
+// callback. shouldStop may be nil (ordinary manual Auto Gather scans). When
+// shouldStop returns true between shows, scanning stops promptly and Cancelled
+// is set. Partial show results gathered so far are retained for debugging only.
+func ScanLibraryWithCancel(libraryRel string, arrayDisks, cacheDisks []DiskRef, shouldStop func() bool) domain.AutoGatherScanResult {
 	libraryRel = strings.Trim(filepath.ToSlash(libraryRel), "/")
 
 	result := domain.AutoGatherScanResult{
@@ -269,6 +277,11 @@ func ScanLibrary(libraryRel string, arrayDisks, cacheDisks []DiskRef) domain.Aut
 	}
 
 	for _, name := range ordered {
+		if shouldStop != nil && shouldStop() {
+			result.Cancelled = true
+			return result
+		}
+
 		relPath := name
 		if libraryRel != "" {
 			relPath = libraryRel + "/" + name

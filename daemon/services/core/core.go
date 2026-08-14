@@ -65,6 +65,11 @@ type Core struct {
 	pendingPlansMu sync.Mutex
 
 	stopped bool
+
+	autoGatherMu            sync.RWMutex
+	autoGatherRun           *domain.AutoGatherDryRunState
+	autoGatherStopRequested bool
+	autoGatherDryRunExec    bool // forces --dry-run on Gather operations during Stage 3B
 }
 
 func Create(ctx *domain.Context) *Core {
@@ -130,7 +135,7 @@ func (c *Core) mailboxHandler() {
 	for p := range c.mailbox {
 		packet := p.(domain.Packet)
 
-		if c.state.Status != common.OpNeutral && packet.Topic != common.CommandStop {
+		if !c.mailboxAllows(packet.Topic) {
 			logger.Yellow("unbalance is busy: %d", c.state.Status)
 			continue
 		}
@@ -209,8 +214,42 @@ func (c *Core) mailboxHandler() {
 
 		case common.CommandStop:
 			c.stopped = true
+			c.requestAutoGatherDryRunStop()
 
 		}
+	}
+}
+
+// mailboxAllows gates manual Gather/Scatter commands while Stage 3B is active.
+// The Auto Gather session-active flag is authoritative across temporary Status
+// transitions (e.g. OpGatherMove / OpNeutral during synchronous dry-run ops).
+// Stop remains available during Auto Gather dry-run and in-flight Gather moves.
+func (c *Core) mailboxAllows(topic string) bool {
+	if topic == common.CommandStop {
+		return c.state.Status == common.OpGatherMove ||
+			c.state.Status == common.OpAutoGatherDryRun ||
+			c.isAutoGatherDryRunActive()
+	}
+	if c.isAutoGatherDryRunActive() {
+		return false
+	}
+	if c.state.Status == common.OpNeutral {
+		return true
+	}
+	return false
+}
+
+func (c *Core) isAutoGatherDryRunActive() bool {
+	c.autoGatherMu.RLock()
+	defer c.autoGatherMu.RUnlock()
+	if c.autoGatherRun == nil {
+		return false
+	}
+	switch c.autoGatherRun.Phase {
+	case domain.AutoGatherDryRunPhaseRunning, domain.AutoGatherDryRunPhaseStopping:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -384,6 +423,10 @@ func (c *Core) historyWrite(history *domain.History) error {
 }
 
 func (c *Core) updateHistory(history *domain.History, operation *domain.Operation) {
+	// Stage 3B dry-run orchestration must not churn normal Gather/Scatter history.
+	if c.autoGatherDryRunExec {
+		return
+	}
 	count := len(history.Order)
 	if count == common.HistoryCapacity {
 		delete(history.Items, history.Order[count-1])

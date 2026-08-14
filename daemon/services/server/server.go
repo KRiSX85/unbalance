@@ -113,6 +113,9 @@ func (s *Server) Start() error {
 	protected.GET("/size/:route", s.size)
 	protected.GET("/auto-gather/scan", s.autoGatherScan)
 	protected.POST("/auto-gather/canonical-plan", s.autoGatherCanonicalPlan, s.requireCSRF)
+	protected.POST("/auto-gather/dry-run/start", s.autoGatherDryRunStart, s.requireCSRF)
+	protected.POST("/auto-gather/dry-run/stop", s.autoGatherDryRunStop, s.requireCSRF)
+	protected.GET("/auto-gather/dry-run/status", s.autoGatherDryRunStatus)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -304,6 +307,22 @@ func (s *Server) autoGatherCanonicalPlan(c echo.Context) error {
 		return c.JSON(200, result)
 	}
 	return c.JSON(200, result)
+}
+
+func (s *Server) autoGatherDryRunStart(c echo.Context) error {
+	state, err := s.core.StartAutoGatherDryRun()
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherDryRunStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherDryRun())
+}
+
+func (s *Server) autoGatherDryRunStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherDryRunState())
 }
 
 func (s *Server) setTvLibraryPath(c echo.Context) error {

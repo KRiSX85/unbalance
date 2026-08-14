@@ -43,6 +43,30 @@ func TestScanLibraryOneShowOnOneDisk(t *testing.T) {
 	}
 }
 
+func TestScanLibraryWithCancelStopsBetweenShows(t *testing.T) {
+	root := t.TempDir()
+	disk1 := filepath.Join(root, "disk1")
+	mustMkdirAll(t, filepath.Join(disk1, "data/media/tv/ShowA"))
+	mustWriteFile(t, filepath.Join(disk1, "data/media/tv/ShowA/ep1.mkv"), string(make([]byte, 100)))
+	mustMkdirAll(t, filepath.Join(disk1, "data/media/tv/ShowB"))
+	mustWriteFile(t, filepath.Join(disk1, "data/media/tv/ShowB/ep1.mkv"), string(make([]byte, 100)))
+
+	calls := 0
+	result := ScanLibraryWithCancel("data/media/tv", []DiskRef{
+		{Name: "disk1", Path: disk1},
+	}, nil, func() bool {
+		calls++
+		// Cancel before the second show is scanned.
+		return calls > 1
+	})
+	if !result.Cancelled {
+		t.Fatal("expected Cancelled=true")
+	}
+	if len(result.Shows) != 1 || result.Shows[0].Name != "ShowA" {
+		t.Fatalf("want only ShowA before cancel, got %+v", result.Shows)
+	}
+}
+
 func TestScanLibrarySplitAcrossTwoDisks(t *testing.T) {
 	root := t.TempDir()
 	disk1 := filepath.Join(root, "disk1")

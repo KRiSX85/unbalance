@@ -139,13 +139,28 @@ func getItems(blockSize uint64, re *regexp.Regexp, src, folder string) ([]*domai
 }
 
 func (c *Core) getItemsAndIssues(status, blockSize uint64, reItems, reStat *regexp.Regexp, disks []*domain.Disk, folders []string) ([]*domain.Item, int64, int64, int64, int64) {
+	items, ownerIssue, groupIssue, folderIssue, fileIssue, _ := c.getItemsAndIssuesCancellable(status, blockSize, reItems, reStat, disks, folders, nil)
+	return items, ownerIssue, groupIssue, folderIssue, fileIssue
+}
+
+// getItemsAndIssuesCancellable is the shared Gather discovery loop with an
+// optional Stage-3B-only cancellation callback. shouldStop nil preserves the
+// historical manual Gather/Scatter semantics exactly.
+func (c *Core) getItemsAndIssuesCancellable(status, blockSize uint64, reItems, reStat *regexp.Regexp, disks []*domain.Disk, folders []string, shouldStop func() bool) ([]*domain.Item, int64, int64, int64, int64, bool) {
 	var ownerIssue, groupIssue, folderIssue, fileIssue int64
 	items := make([]*domain.Item, 0)
 
 	// Get owner/permission issues
 	// Get items to be transferred
 	for _, disk := range disks {
+		if shouldStop != nil && shouldStop() {
+			return items, ownerIssue, groupIssue, folderIssue, fileIssue, true
+		}
 		for _, path := range folders {
+			if shouldStop != nil && shouldStop() {
+				return items, ownerIssue, groupIssue, folderIssue, fileIssue, true
+			}
+
 			// logging
 			logger.Blue("scanning:disk(%s):folder(%s)", disk.Path, path)
 
@@ -182,7 +197,7 @@ func (c *Core) getItemsAndIssues(status, blockSize uint64, reItems, reStat *rege
 		}
 	}
 
-	return items, ownerIssue, groupIssue, folderIssue, fileIssue
+	return items, ownerIssue, groupIssue, folderIssue, fileIssue, false
 }
 
 func (c *Core) sendTimeFeedbackToFrontend(topic, fended string, elapsed time.Duration) {

@@ -27,6 +27,7 @@ const (
 	OpScatterValidate = 4
 	OpGatherPlan      = 5
 	OpGatherMove      = 6
+	OpAutoGatherDryRun = 7
 )
 
 const (
