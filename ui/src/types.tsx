@@ -7,6 +7,7 @@ export enum Op {
   GatherPlan = 5,
   GatherMove = 6,
   AutoGatherDryRun = 7,
+  AutoGatherReal = 8,
 }
 
 export type Step = 'idle' | 'select' | 'plan' | 'transfer';
@@ -147,6 +148,51 @@ export interface AutoGatherDryRunState {
   splitRemaining?: number;
   message?: string;
   error?: string;
+}
+
+export interface AutoGatherRealPrepareResult {
+  preparationId: string;
+  showPath: string;
+  showName?: string;
+  sourceDisks?: string[];
+  canonicalTargetDisk?: string;
+  stage2RecommendedTarget?: string;
+  stage2AgreesWithCanonical: boolean;
+  currentBytesOnTarget?: number;
+  estimatedMoveBytes?: number;
+  targetFreeBytes?: number;
+  projectedTargetFreeBytes?: number;
+  executable: boolean;
+  issues?: string[];
+  emptyFolderOnlyDisks?: string[];
+  expiresAt?: string;
+  globalDryRun: boolean;
+  error?: string;
+}
+
+export interface AutoGatherRealVerification {
+  passed: boolean;
+  targetDisk?: string;
+  substantiveDisks?: string[];
+  emptyFolderRemnants?: string[];
+  message?: string;
+}
+
+export interface AutoGatherRealState {
+  phase: string;
+  globalDryRun: boolean;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  operationPhase?: string;
+  preparationId?: string;
+  prepared?: AutoGatherRealPrepareResult;
+  verification?: AutoGatherRealVerification;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+  message?: string;
+  stoppedMessage?: string;
 }
 
 export interface AuthStatus {

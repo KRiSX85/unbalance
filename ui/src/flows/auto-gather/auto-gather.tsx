@@ -15,9 +15,10 @@ import {
   useAutoGatherResult,
   useAutoGatherScanning,
 } from '~/state/auto-gather';
-import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherShow } from '~/types';
+import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
 import {
+  isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
 } from '~/helpers/auto-gather-ui';
 import { Icon } from '~/shared/icons/icon';
@@ -94,9 +95,13 @@ const diskNames = (
     .join(', ');
 };
 
-const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
-  show,
-}) => {
+const ShowRow: React.FunctionComponent<{
+  show: AutoGatherShow;
+  realBusy: boolean;
+  dryRunActive: boolean;
+  onPrepareReal: (show: AutoGatherShow) => void;
+  preparingReal: boolean;
+}> = ({ show, realBusy, dryRunActive, onPrepareReal, preparingReal }) => {
   const [expanded, setExpanded] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
   const [canonical, setCanonical] =
@@ -304,6 +309,26 @@ const ShowRow: React.FunctionComponent<{ show: AutoGatherShow }> = ({
               )}
 
               <div className="mt-3 border-t border-slate-200 dark:border-gray-800 pt-3">
+                <div className="text-sm font-medium text-red-800 dark:text-red-300">
+                  Real Gather — ONE SHOW (Stage 3C)
+                </div>
+                <div className="text-xs text-red-700 dark:text-red-400 mt-1">
+                  Prepare inspects the move only. Confirmation is required before
+                  any files are transferred or source data removed.
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-2 border-red-300 dark:border-red-700"
+                  disabled={preparingReal || realBusy || dryRunActive}
+                  onClick={() => onPrepareReal(show)}
+                >
+                  {preparingReal ? 'Preparing…' : 'Prepare real Gather'}
+                </Button>
+              </div>
+
+              <div className="mt-3 border-t border-slate-200 dark:border-gray-800 pt-3">
                 <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
                   Canonical Gather verification (read-only)
                 </div>
@@ -431,13 +456,30 @@ export const AutoGather: React.FunctionComponent = () => {
   const result = useAutoGatherResult();
   const error = useAutoGatherError();
   const { toast } = useToast();
-  const { syncAutoGatherDryRun } = useUnraidActions();
+  const { syncAutoGatherDryRun, syncAutoGatherReal } = useUnraidActions();
 
   const [pathValue, setPathValue] = React.useState(tvLibraryPath);
   const [filter, setFilter] = React.useState<ShowFilter>('attention');
   const [saving, setSaving] = React.useState(false);
   const [dryRunState, setDryRunState] = React.useState<AutoGatherDryRunState | null>(null);
   const [dryRunBusy, setDryRunBusy] = React.useState(false);
+  const [realState, setRealState] = React.useState<AutoGatherRealState | null>(null);
+  const [realBusy, setRealBusy] = React.useState(false);
+  const [preparingShowPath, setPreparingShowPath] = React.useState('');
+  const [confirmOpen, setConfirmOpen] = React.useState(false);
+  const [preparedMove, setPreparedMove] = React.useState<AutoGatherRealPrepareResult | null>(null);
+
+  const refreshRealStatus = React.useCallback(async () => {
+    try {
+      const status = await Api.getAutoGatherRealStatus();
+      setRealState(status);
+      if (status.prepared) {
+        setPreparedMove(status.prepared);
+      }
+    } catch {
+      // ignore transient poll errors
+    }
+  }, []);
 
   const refreshDryRunStatus = React.useCallback(async () => {
     try {
@@ -450,7 +492,8 @@ export const AutoGather: React.FunctionComponent = () => {
 
   React.useEffect(() => {
     void refreshDryRunStatus();
-  }, [refreshDryRunStatus]);
+    void refreshRealStatus();
+  }, [refreshDryRunStatus, refreshRealStatus]);
 
   React.useEffect(() => {
     const phase = dryRunState?.phase;
@@ -462,6 +505,17 @@ export const AutoGather: React.FunctionComponent = () => {
     }, 2000);
     return () => window.clearInterval(id);
   }, [dryRunState?.phase, refreshDryRunStatus]);
+
+  React.useEffect(() => {
+    const phase = realState?.phase;
+    if (!isAutoGatherRealExecutionPhase(phase)) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void refreshRealStatus();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [realState?.phase, refreshRealStatus]);
 
   const onStartDryRun = async () => {
     setDryRunBusy(true);
@@ -500,6 +554,78 @@ export const AutoGather: React.FunctionComponent = () => {
       });
     } finally {
       setDryRunBusy(false);
+    }
+  };
+
+  const onPrepareReal = async (show: AutoGatherShow) => {
+    setPreparingShowPath(show.path);
+    setRealBusy(true);
+    try {
+      const prep = await Api.prepareAutoGatherReal({
+        showPath: show.path,
+        stage2RecommendedTarget: show.recommendedTargetDisk,
+        stage2EstimatedMoveBytes: show.moveRequiredBytes,
+      });
+      if (prep.error) {
+        toast({ title: prep.error, variant: 'destructive' });
+        return;
+      }
+      setPreparedMove(prep);
+      setConfirmOpen(true);
+      await refreshRealStatus();
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to prepare real move',
+        variant: 'destructive',
+      });
+    } finally {
+      setPreparingShowPath('');
+      setRealBusy(false);
+    }
+  };
+
+  const onConfirmRealExecute = async () => {
+    if (!preparedMove?.preparationId) {
+      return;
+    }
+    setRealBusy(true);
+    try {
+      const state = await Api.executeAutoGatherReal({
+        preparationId: preparedMove.preparationId,
+        showPath: preparedMove.showPath,
+        confirm: true,
+      });
+      setRealState(state);
+      setConfirmOpen(false);
+      syncAutoGatherReal(true);
+      toast({
+        title: 'Real Gather started',
+        description: 'This is NOT a dry run. Only the selected show will be moved.',
+      });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to execute real move',
+        variant: 'destructive',
+      });
+      await refreshRealStatus();
+    } finally {
+      setRealBusy(false);
+    }
+  };
+
+  const onStopReal = async () => {
+    setRealBusy(true);
+    try {
+      const state = await Api.stopAutoGatherReal();
+      setRealState(state);
+      toast({ title: 'Real Gather stop requested' });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to stop real move',
+        variant: 'destructive',
+      });
+    } finally {
+      setRealBusy(false);
     }
   };
 
@@ -554,11 +680,17 @@ export const AutoGather: React.FunctionComponent = () => {
   const warnings = result?.warnings ?? [];
   const dryRunPhase = dryRunState?.phase ?? 'idle';
   const dryRunActive = dryRunPhase === 'running' || dryRunPhase === 'stopping';
-  const stopEnabled = isAutoGatherStopEnabled(dryRunPhase);
+  const realPhase = realState?.phase ?? 'idle';
+  const realExecutionActive = isAutoGatherRealExecutionPhase(realPhase);
+  const stopEnabled = isAutoGatherStopEnabled(dryRunPhase, realPhase);
 
   React.useEffect(() => {
     syncAutoGatherDryRun(dryRunActive);
   }, [dryRunActive, syncAutoGatherDryRun]);
+
+  React.useEffect(() => {
+    syncAutoGatherReal(realExecutionActive);
+  }, [realExecutionActive, syncAutoGatherReal]);
 
   return (
     <div className="flex flex-col h-full bg-neutral-100 dark:bg-gray-950">
@@ -641,6 +773,110 @@ export const AutoGather: React.FunctionComponent = () => {
           </div>
         </div>
 
+        <div className="mt-4 rounded border border-red-400 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3">
+          <div className="text-sm font-semibold text-red-900 dark:text-red-200">
+            Real Gather — ONE SHOW (Stage 3C)
+          </div>
+          <p className="text-xs text-red-800 dark:text-red-300 mt-1">
+            This will move files and may remove successfully transferred source
+            files. Only the selected show will be processed. This is NOT a dry
+            run. Disable global dry-run mode before confirming a real move.
+          </p>
+          {globalDryRun && (
+            <p className="text-xs text-red-800 dark:text-red-300 mt-2 font-medium">
+              Global dry-run is enabled. Real execution is disabled until you turn
+              it off in Settings.
+            </p>
+          )}
+          {preparedMove && confirmOpen && (
+            <div className="mt-3 rounded border border-red-300 dark:border-red-700 bg-white/70 dark:bg-gray-950/50 p-3 space-y-2 text-sm">
+              <div className="font-semibold text-red-900 dark:text-red-100">
+                Confirm real move (not a dry run)
+              </div>
+              <div>Show: {preparedMove.showName || preparedMove.showPath}</div>
+              <div>
+                Source disks: {(preparedMove.sourceDisks || []).join(', ') || 'none'}
+              </div>
+              <div>Destination: {preparedMove.canonicalTargetDisk}</div>
+              <div>
+                Bytes to move: {humanBytes(preparedMove.estimatedMoveBytes || 0)}
+              </div>
+              <div>
+                Projected target free:{' '}
+                {humanBytes(preparedMove.projectedTargetFreeBytes || 0)}
+              </div>
+              {(preparedMove.issues?.length || 0) > 0 && (
+                <div className="text-amber-800 dark:text-amber-300">
+                  Issues: {preparedMove.issues!.join('; ')}
+                </div>
+              )}
+              {(preparedMove.emptyFolderOnlyDisks?.length || 0) > 0 && (
+                <div className="text-xs">
+                  Empty-folder-only disks:{' '}
+                  {preparedMove.emptyFolderOnlyDisks!.join(', ')}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2 pt-2">
+                <Button
+                  variant="destructive"
+                  disabled={globalDryRun || realBusy || realExecutionActive || !preparedMove.executable}
+                  onClick={() => void onConfirmRealExecute()}
+                >
+                  Confirm real Gather
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfirmOpen(false)}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2 mt-3">
+            <Button
+              variant="outline"
+              className="border-red-300 dark:border-red-700"
+              disabled={!stopEnabled}
+              onClick={() => void onStopReal()}
+            >
+              Stop real move
+            </Button>
+          </div>
+          <div className="mt-3 text-sm text-red-900 dark:text-red-100 space-y-1">
+            <div>
+              Status: <span className="font-medium">{realPhase}</span>
+              {realState?.operationPhase
+                ? ` (${realState.operationPhase})`
+                : ''}
+            </div>
+            {(realState?.currentShowName || realState?.currentShow) && (
+              <div>
+                Current show:{' '}
+                {realState?.currentShowName || realState?.currentShow}
+                {realState?.currentTarget
+                  ? ` → ${realState.currentTarget}`
+                  : ''}
+              </div>
+            )}
+            {realState?.stoppedMessage && (
+              <div>{realState.stoppedMessage}</div>
+            )}
+            {realState?.error && <div>{realState.error}</div>}
+            {realState?.verification && (
+              <div>
+                Verification: {realState.verification.message}
+                {(realState.verification.substantiveDisks?.length || 0) > 0 && (
+                  <> Remaining disks: {realState.verification.substantiveDisks!.join(', ')}</>
+                )}
+                {(realState.verification.emptyFolderRemnants?.length || 0) > 0 && (
+                  <> Empty-folder remnants: {realState.verification.emptyFolderRemnants!.join(', ')}</>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
         <div className="flex flex-row flex-wrap items-center gap-2 mt-4">
           <span className="text-sm text-slate-500 dark:text-gray-500">
             /mnt/user/
@@ -659,7 +895,7 @@ export const AutoGather: React.FunctionComponent = () => {
           >
             {saving ? 'Saving…' : 'Save path'}
           </Button>
-          <Button onClick={() => void onScan()} disabled={scanning || dryRunActive}>
+          <Button onClick={() => void onScan()} disabled={scanning || dryRunActive || realExecutionActive}>
             {scanning ? 'Scanning…' : 'Scan library'}
           </Button>
           {scanning && (
@@ -757,7 +993,14 @@ export const AutoGather: React.FunctionComponent = () => {
           </div>
         )}
         {filtered.map((show) => (
-          <ShowRow key={show.path} show={show} />
+          <ShowRow
+            key={show.path}
+            show={show}
+            realBusy={realBusy || realExecutionActive}
+            dryRunActive={dryRunActive}
+            onPrepareReal={(s) => void onPrepareReal(s)}
+            preparingReal={preparingShowPath === show.path}
+          />
         ))}
       </div>
     </div>

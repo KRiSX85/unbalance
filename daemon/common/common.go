@@ -28,6 +28,7 @@ const (
 	OpGatherPlan      = 5
 	OpGatherMove      = 6
 	OpAutoGatherDryRun = 7
+	OpAutoGatherReal   = 8
 )
 
 const (

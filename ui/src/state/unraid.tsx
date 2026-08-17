@@ -17,6 +17,7 @@ import {
 } from '~/types';
 import {
   isAutoGatherDryRunActivePhase,
+  isAutoGatherRealActivePhase,
   routeForLoadedState,
   shouldFollowTransferEndedNavigation,
 } from '~/helpers/auto-gather-ui';
@@ -69,6 +70,7 @@ interface UnraidStore {
     stop: () => void;
     operationError: (payload: string) => void;
     syncAutoGatherDryRun: (active: boolean) => void;
+    syncAutoGatherReal: (active: boolean) => void;
   };
 }
 
@@ -264,18 +266,31 @@ export const useUnraidStore = create<UnraidStore>()(
         getUnraid: async () => {
           const array = await Api.getUnraid();
           let dryRunPhase: string | undefined;
+          let realPhase: string | undefined;
           try {
             const dryRun = await Api.getAutoGatherDryRunStatus();
             dryRunPhase = dryRun.phase;
           } catch {
             dryRunPhase = undefined;
           }
+          try {
+            const real = await Api.getAutoGatherRealStatus();
+            realPhase = real.phase;
+          } catch {
+            realPhase = undefined;
+          }
 
           console.log('useUnraidStore.getUnraid() ', array);
 
-          const autoGatherActive = isAutoGatherDryRunActivePhase(dryRunPhase);
-          const route = routeForLoadedState(array.status, dryRunPhase);
-          const status = autoGatherActive ? Op.AutoGatherDryRun : array.status;
+          const dryRunActive = isAutoGatherDryRunActivePhase(dryRunPhase);
+          const realActive = isAutoGatherRealActivePhase(realPhase);
+          const autoGatherActive = dryRunActive || realActive;
+          const route = routeForLoadedState(array.status, dryRunPhase, realPhase);
+          const status = autoGatherActive
+            ? realActive
+              ? Op.AutoGatherReal
+              : Op.AutoGatherDryRun
+            : array.status;
 
           set((state) => {
             state.loaded = true;
@@ -350,7 +365,8 @@ export const useUnraidStore = create<UnraidStore>()(
           set((state) => {
             if (
               !state.autoGatherUiActive &&
-              state.status !== Op.AutoGatherDryRun
+              state.status !== Op.AutoGatherDryRun &&
+              state.status !== Op.AutoGatherReal
             ) {
               state.status = Op.Neutral;
               state.plan = payload;
@@ -422,7 +438,8 @@ export const useUnraidStore = create<UnraidStore>()(
         transferProgress: (payload: Operation) => {
           if (
             get().autoGatherUiActive ||
-            get().status === Op.AutoGatherDryRun
+            get().status === Op.AutoGatherDryRun ||
+            get().status === Op.AutoGatherReal
           ) {
             return;
           }
@@ -486,7 +503,8 @@ export const useUnraidStore = create<UnraidStore>()(
         gatherProgress: (payload: string) => {
           if (
             get().autoGatherUiActive ||
-            get().status === Op.AutoGatherDryRun
+            get().status === Op.AutoGatherDryRun ||
+            get().status === Op.AutoGatherReal
           ) {
             return;
           }
@@ -499,7 +517,8 @@ export const useUnraidStore = create<UnraidStore>()(
           set((state) => {
             if (
               !state.autoGatherUiActive &&
-              state.status !== Op.AutoGatherDryRun
+              state.status !== Op.AutoGatherDryRun &&
+              state.status !== Op.AutoGatherReal
             ) {
               state.status = Op.Neutral;
               state.plan = payload;
@@ -640,15 +659,22 @@ export const useUnraidStore = create<UnraidStore>()(
               state.status = Op.AutoGatherDryRun;
               return;
             }
-            if (state.autoGatherUiActive || state.status === Op.AutoGatherDryRun) {
+            if (state.status === Op.AutoGatherDryRun) {
               state.autoGatherUiActive = false;
-              if (
-                state.status === Op.AutoGatherDryRun ||
-                state.status === Op.GatherPlan ||
-                state.status === Op.GatherMove
-              ) {
-                state.status = Op.Neutral;
-              }
+              state.status = Op.Neutral;
+            }
+          });
+        },
+        syncAutoGatherReal: (active: boolean) => {
+          set((state) => {
+            if (active) {
+              state.autoGatherUiActive = true;
+              state.status = Op.AutoGatherReal;
+              return;
+            }
+            if (state.status === Op.AutoGatherReal) {
+              state.autoGatherUiActive = false;
+              state.status = Op.Neutral;
             }
           });
         },

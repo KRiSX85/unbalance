@@ -79,6 +79,23 @@ func (c *Core) buildCanonicalPlanResult(showPath, stage2Target string, stage2Mov
 // buildCanonicalPlanResultCancellable is the Stage-3B-aware variant. shouldStop
 // nil preserves Stage 3A / read-only behaviour.
 func (c *Core) buildCanonicalPlanResultCancellable(showPath, stage2Target string, stage2Move uint64, shouldStop func() bool) domain.AutoGatherCanonicalPlanResult {
+	bundle, cancelled := c.buildAutoGatherCanonicalBundleCancellable(showPath, stage2Target, stage2Move, shouldStop)
+	if cancelled {
+		return domain.AutoGatherCanonicalPlanResult{ShowPath: showPath, Cancelled: true}
+	}
+	return bundle.Result
+}
+
+// autoGatherCanonicalBundle pairs the canonical DTO with the executable Gather
+// plan produced by a single fillGatherPlanCancellable call.
+type autoGatherCanonicalBundle struct {
+	Result domain.AutoGatherCanonicalPlanResult
+	Plan   *domain.Plan
+}
+
+// buildAutoGatherCanonicalBundleCancellable performs one Gather fill and returns
+// both the canonical Auto Gather result and the executable plan.
+func (c *Core) buildAutoGatherCanonicalBundleCancellable(showPath, stage2Target string, stage2Move uint64, shouldStop func() bool) (autoGatherCanonicalBundle, bool) {
 	result := domain.AutoGatherCanonicalPlanResult{
 		ShowPath:                 showPath,
 		Stage2RecommendedTarget:  stage2Target,
@@ -86,13 +103,12 @@ func (c *Core) buildCanonicalPlanResultCancellable(showPath, stage2Target string
 	}
 
 	if shouldStop != nil && shouldStop() {
-		result.Cancelled = true
-		return result
+		return autoGatherCanonicalBundle{Result: domain.AutoGatherCanonicalPlanResult{ShowPath: showPath, Cancelled: true}}, true
 	}
 
 	if c.state.Unraid == nil || len(c.state.Unraid.Disks) == 0 {
 		result.Error = "unable to read array disks"
-		return result
+		return autoGatherCanonicalBundle{Result: result}, false
 	}
 
 	plan := &domain.Plan{
@@ -114,16 +130,16 @@ func (c *Core) buildCanonicalPlanResultCancellable(showPath, stage2Target string
 
 	items, cancelled := c.fillGatherPlanCancellable(plan, c.state.Unraid.Disks, c.state.Unraid.BlockSize, shouldStop)
 	if cancelled {
-		result.Cancelled = true
-		return result
+		return autoGatherCanonicalBundle{Result: domain.AutoGatherCanonicalPlanResult{ShowPath: showPath, Cancelled: true}}, true
 	}
-	return assembleAutoGatherCanonicalResult(
+	result = assembleAutoGatherCanonicalResult(
 		result,
 		plan,
 		c.state.Unraid.Disks,
 		items,
 		c.state.Unraid.BlockSize,
 	)
+	return autoGatherCanonicalBundle{Result: result, Plan: plan}, false
 }
 
 func validateAutoGatherCanonicalSelection(selected []string) (string, error) {

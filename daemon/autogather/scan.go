@@ -316,6 +316,44 @@ func ScanLibraryWithCancel(libraryRel string, arrayDisks, cacheDisks []DiskRef, 
 	return result
 }
 
+// ScanSingleShow inspects one show path across array and cache disks. Used by
+// Stage 3C post-move verification; read-only.
+func ScanSingleShow(showRelPath string, arrayDisks, cacheDisks []DiskRef) domain.AutoGatherShow {
+	showRelPath = strings.Trim(filepath.ToSlash(showRelPath), "/")
+	name := filepath.Base(showRelPath)
+
+	arrayOrder := make([]string, 0, len(arrayDisks))
+	for _, d := range arrayDisks {
+		arrayOrder = append(arrayOrder, d.Name)
+	}
+	cacheOrder := make([]string, 0, len(cacheDisks))
+	for _, d := range cacheDisks {
+		cacheOrder = append(cacheOrder, d.Name)
+	}
+
+	arrayStats := make(map[string]showDiskStats, len(arrayDisks))
+	for _, disk := range arrayDisks {
+		entry := filepath.Join(disk.Path, filepath.FromSlash(showRelPath))
+		stats, err := scanShowOnDisk(entry)
+		if err != nil {
+			continue
+		}
+		arrayStats[disk.Name] = stats
+	}
+
+	cacheStats := make(map[string]showDiskStats, len(cacheDisks))
+	for _, disk := range cacheDisks {
+		entry := filepath.Join(disk.Path, filepath.FromSlash(showRelPath))
+		stats, err := scanShowOnDisk(entry)
+		if err != nil {
+			continue
+		}
+		cacheStats[disk.Name] = stats
+	}
+
+	return classifyShow(name, showRelPath, arrayStats, cacheStats, arrayOrder, cacheOrder)
+}
+
 // PartitionDisks separates destination-capable physical array disks from cache
 // pools.
 //

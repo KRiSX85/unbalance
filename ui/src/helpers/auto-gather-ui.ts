@@ -5,8 +5,38 @@ export function isAutoGatherDryRunActivePhase(phase?: string | null): boolean {
   return phase === 'running' || phase === 'stopping';
 }
 
-export function isAutoGatherStopEnabled(phase?: string | null): boolean {
-  return isAutoGatherDryRunActivePhase(phase);
+export function isAutoGatherRealActivePhase(phase?: string | null): boolean {
+  return (
+    phase === 'preparing' ||
+    phase === 'prepared' ||
+    phase === 'executing' ||
+    phase === 'stopping'
+  );
+}
+
+export function isAutoGatherRealExecutionPhase(phase?: string | null): boolean {
+  return phase === 'executing' || phase === 'stopping';
+}
+
+export function isAutoGatherRealTerminalPhase(phase?: string | null): boolean {
+  return (
+    phase === 'stopped' ||
+    phase === 'completed' ||
+    phase === 'failed' ||
+    phase === 'verification_warning' ||
+    phase === 'idle' ||
+    !phase
+  );
+}
+
+export function isAutoGatherStopEnabled(
+  dryRunPhase?: string | null,
+  realPhase?: string | null,
+): boolean {
+  return (
+    isAutoGatherDryRunActivePhase(dryRunPhase) ||
+    isAutoGatherRealExecutionPhase(realPhase)
+  );
 }
 
 export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
@@ -21,13 +51,23 @@ export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
 
 export function shouldKeepAutoGatherPageVisible(
   status: Op,
-  phase?: string | null,
+  dryRunPhase?: string | null,
+  realPhase?: string | null,
 ): boolean {
-  return status === Op.AutoGatherDryRun || isAutoGatherDryRunActivePhase(phase);
+  return (
+    status === Op.AutoGatherDryRun ||
+    status === Op.AutoGatherReal ||
+    isAutoGatherDryRunActivePhase(dryRunPhase) ||
+    isAutoGatherRealActivePhase(realPhase)
+  );
 }
 
-export function routeForLoadedState(status: Op, phase?: string | null): string {
-  if (shouldKeepAutoGatherPageVisible(status, phase)) {
+export function routeForLoadedState(
+  status: Op,
+  dryRunPhase?: string | null,
+  realPhase?: string | null,
+): string {
+  if (shouldKeepAutoGatherPageVisible(status, dryRunPhase, realPhase)) {
     return '/auto-gather';
   }
   return getRouteFromStatus(status);
@@ -35,9 +75,10 @@ export function routeForLoadedState(status: Op, phase?: string | null): string {
 
 export function shouldFollowTransferEndedNavigation(
   status: Op,
-  phase?: string | null,
+  dryRunPhase?: string | null,
+  realPhase?: string | null,
 ): boolean {
-  return !shouldKeepAutoGatherPageVisible(status, phase);
+  return !shouldKeepAutoGatherPageVisible(status, dryRunPhase, realPhase);
 }
 
 export function headerShowsBusy(status: Op): boolean {
@@ -46,9 +87,10 @@ export function headerShowsBusy(status: Op): boolean {
 
 export function shouldReplacePageWithScatterGatherOperation(
   status: Op,
-  phase?: string | null,
+  dryRunPhase?: string | null,
+  realPhase?: string | null,
 ): boolean {
-  if (shouldKeepAutoGatherPageVisible(status, phase)) {
+  if (shouldKeepAutoGatherPageVisible(status, dryRunPhase, realPhase)) {
     return false;
   }
   return status !== Op.Neutral;

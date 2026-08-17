@@ -116,6 +116,10 @@ func (s *Server) Start() error {
 	protected.POST("/auto-gather/dry-run/start", s.autoGatherDryRunStart, s.requireCSRF)
 	protected.POST("/auto-gather/dry-run/stop", s.autoGatherDryRunStop, s.requireCSRF)
 	protected.GET("/auto-gather/dry-run/status", s.autoGatherDryRunStatus)
+	protected.POST("/auto-gather/real/prepare", s.autoGatherRealPrepare, s.requireCSRF)
+	protected.POST("/auto-gather/real/execute", s.autoGatherRealExecute, s.requireCSRF)
+	protected.POST("/auto-gather/real/stop", s.autoGatherRealStop, s.requireCSRF)
+	protected.GET("/auto-gather/real/status", s.autoGatherRealStatus)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -323,6 +327,34 @@ func (s *Server) autoGatherDryRunStop(c echo.Context) error {
 
 func (s *Server) autoGatherDryRunStatus(c echo.Context) error {
 	return c.JSON(200, s.core.GetAutoGatherDryRunState())
+}
+
+func (s *Server) autoGatherRealPrepare(c echo.Context) error {
+	var req domain.AutoGatherRealPrepareRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid real prepare request")
+	}
+	return c.JSON(200, s.core.PrepareAutoGatherReal(req))
+}
+
+func (s *Server) autoGatherRealExecute(c echo.Context) error {
+	var req domain.AutoGatherRealExecuteRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid real execute request")
+	}
+	state, err := s.core.ExecuteAutoGatherReal(req)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherRealStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherReal())
+}
+
+func (s *Server) autoGatherRealStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherRealState())
 }
 
 func (s *Server) setTvLibraryPath(c echo.Context) error {

@@ -4,6 +4,7 @@ import { Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
   headerShowsBusy,
+  isAutoGatherRealActivePhase,
   isAutoGatherStopEnabled,
   isAutoGatherTerminalPhase,
   routeForLoadedState,
@@ -73,5 +74,23 @@ describe('Auto Gather Stage 3B UI routing', () => {
     expect(headerShowsBusy(Op.AutoGatherDryRun)).toBe(true);
     expect(headerShowsBusy(Op.Neutral)).toBe(false);
     expect(headerShowsBusy(Op.GatherMove)).toBe(true);
+  });
+});
+
+describe('Auto Gather Stage 3C UI routing', () => {
+  it('keeps Auto Gather visible during real execution phases', () => {
+    expect(getRouteFromStatus(Op.AutoGatherReal)).toBe('/auto-gather');
+    expect(isAutoGatherRealActivePhase('executing')).toBe(true);
+    expect(isAutoGatherRealActivePhase('prepared')).toBe(true);
+    expect(routeForLoadedState(Op.AutoGatherReal, undefined, 'executing')).toBe(
+      '/auto-gather',
+    );
+    expect(
+      shouldKeepAutoGatherPageVisible(Op.Neutral, undefined, 'executing'),
+    ).toBe(true);
+    expect(isAutoGatherStopEnabled(undefined, 'executing')).toBe(true);
+    expect(
+      shouldFollowTransferEndedNavigation(Op.AutoGatherReal, undefined, 'executing'),
+    ).toBe(false);
   });
 });

@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -202,6 +202,63 @@ export class Api {
 
   static async getAutoGatherDryRunStatus(): Promise<AutoGatherDryRunState> {
     const response = await fetch(`${Api.host}/auto-gather/dry-run/status`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async prepareAutoGatherReal(payload: {
+    showPath: string;
+    stage2RecommendedTarget?: string;
+    stage2EstimatedMoveBytes?: number;
+  }): Promise<AutoGatherRealPrepareResult> {
+    const response = await fetch(`${Api.host}/auto-gather/real/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async executeAutoGatherReal(payload: {
+    preparationId: string;
+    showPath: string;
+    confirm: boolean;
+  }): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to execute real Auto Gather move');
+    }
+    return body;
+  }
+
+  static async stopAutoGatherReal(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherRealStatus(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/status`, {
       credentials: 'same-origin',
     });
     if (!response.ok) {

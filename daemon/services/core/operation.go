@@ -26,7 +26,7 @@ const (
 // API; reusing transfer:started/ended here would hijack the UI onto History
 // or the generic Gather transfer page.
 func (c *Core) publishOperationSocket(packet *domain.Packet) {
-	if c.autoGatherDryRunExec {
+	if c.autoGatherDryRunExec || c.autoGatherRealExec {
 		return
 	}
 	if c.ctx == nil || c.ctx.Hub == nil {
@@ -60,9 +60,9 @@ func (c *Core) runOperation(opName string) {
 	commandsExecuted := make([]string, 0)
 
 	for _, command := range operation.Commands {
-		// Stage 3B cooperative stop: do not start another rsync command once Stop
-		// has been requested for the active Auto Gather dry-run session.
-		if c.autoGatherDryRunExec && c.autoGatherShouldStop() {
+		// Cooperative stop during Auto Gather dry-run or real execution.
+		if (c.autoGatherDryRunExec && c.autoGatherShouldStop()) ||
+			(c.autoGatherRealExec && c.autoGatherRealShouldStop()) {
 			command.Status = common.CmdStopped
 			command.Reason = "stopped by the user"
 			cmd := fmt.Sprintf(`rsync %s %s %s`, operation.RsyncStrArgs, strconv.Quote(command.Entry), strconv.Quote(command.Dst))
@@ -118,8 +118,9 @@ func (c *Core) runCommand(operation *domain.Operation, command *domain.Command) 
 		paths.DstRoot,
 	)
 
-	// make sure the command will run, unless Stage 3B already requested Stop
-	if !(c.autoGatherDryRunExec && c.autoGatherShouldStop()) {
+	// make sure the command will run, unless Auto Gather already requested Stop
+	if !((c.autoGatherDryRunExec && c.autoGatherShouldStop()) ||
+		(c.autoGatherRealExec && c.autoGatherRealShouldStop())) {
 		c.stopped = false
 	}
 
@@ -317,15 +318,20 @@ func (c *Core) commandCompleted(operation *domain.Operation, command *domain.Com
 	// this is just a heads up for the user, shows which folders would/wouldn't be pruned if run without dry-run
 	showPotentiallyPrunedItems(operation, command)
 
-	// if it isn't a dry-run and the operation is Move or Gather, delete the source folder
+	// Non-dry-run Gather/Scatter Move deletes each successfully transferred source
+	// immediately after its rsync command completes — not deferred to operationCompleted.
 	c.handleItemDeletion(operation, command)
 }
 
 func (c *Core) handleItemDeletion(operation *domain.Operation, command *domain.Command) {
 	if !operation.DryRun && (operation.OpKind == common.OpScatterMove || operation.OpKind == common.OpGatherMove) {
-		// the command was flagged due to an error, don't delete the source file/folder in these cases
-		if command.Status == common.CmdFlagged {
-			msg := fmt.Sprintf("skipping:deletion:(rsync command was flagged):(%s)", filepath.Join(command.Dst, command.Entry))
+		// Never delete after interrupted, flagged, or otherwise non-successful rsync.
+		if command.Status == common.CmdFlagged || command.Status == common.CmdStopped {
+			reason := "flagged"
+			if command.Status == common.CmdStopped {
+				reason = "stopped"
+			}
+			msg := fmt.Sprintf("skipping:deletion:(rsync command was %s):(%s)", reason, filepath.Join(command.Dst, command.Entry))
 			operation.Line = msg
 
 			packet := &domain.Packet{Topic: common.EventTransferProgress, Payload: operation}

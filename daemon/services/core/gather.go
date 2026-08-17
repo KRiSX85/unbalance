@@ -22,8 +22,8 @@ func (c *Core) gatherPlanPrepare(setup domain.GatherSetup) {
 		logger.Yellow("unbalanced is busy: %d", c.state.Status)
 		return
 	}
-	if c.isAutoGatherDryRunActive() {
-		logger.Yellow("manual gather blocked while Auto Gather dry-run is active")
+	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() {
+		logger.Yellow("manual gather blocked while Auto Gather is active")
 		return
 	}
 
@@ -166,6 +166,11 @@ func (c *Core) gatherPlanEnd(plan *domain.Plan) {
 
 // // GATHER TRANSFER
 func (c *Core) gatherMove(planID, target string) {
+	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() {
+		logger.Yellow("manual gather move blocked while Auto Gather is active")
+		c.publishOperationError("unable to start gather move: Auto Gather is active")
+		return
+	}
 	plan, err := c.takePendingPlan(planID, planFlowGather)
 	if err != nil {
 		logger.Yellow("gatherMove: %s", err)

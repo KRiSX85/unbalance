@@ -135,6 +135,13 @@ func (c *Core) StartAutoGatherDryRun() (domain.AutoGatherDryRunState, error) {
 	if c.isAutoGatherDryRunActiveLocked() {
 		return c.snapshotAutoGatherDryRunLocked(), fmt.Errorf("Auto Gather dry-run is already active")
 	}
+	if c.isAutoGatherRealSessionActiveLocked() {
+		return domain.AutoGatherDryRunState{
+			Phase:  domain.AutoGatherDryRunPhaseIdle,
+			DryRun: true,
+			Error:  "Auto Gather real move session is active",
+		}, fmt.Errorf("Auto Gather real move session is active")
+	}
 	if c.state == nil || c.state.Status != common.OpNeutral {
 		return domain.AutoGatherDryRunState{
 			Phase:  domain.AutoGatherDryRunPhaseIdle,

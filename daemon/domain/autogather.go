@@ -175,3 +175,119 @@ type AutoGatherDryRunState struct {
 	Message              string                       `json:"message,omitempty"`
 	Error                string                       `json:"error,omitempty"`
 }
+
+// Auto Gather one-show real execution (Stage 3C) phase values.
+const (
+	AutoGatherRealPhaseIdle                = "idle"
+	AutoGatherRealPhasePreparing           = "preparing"
+	AutoGatherRealPhasePrepared            = "prepared"
+	AutoGatherRealPhaseExecuting           = "executing"
+	AutoGatherRealPhaseStopping            = "stopping"
+	AutoGatherRealPhaseStopped             = "stopped"
+	AutoGatherRealPhaseCompleted           = "completed"
+	AutoGatherRealPhaseFailed              = "failed"
+	AutoGatherRealPhaseVerificationWarning = "verification_warning"
+)
+
+// AutoGatherRealPrepareRequest selects one split show for read-only real-move
+// preparation. Preparation never mutates the filesystem.
+type AutoGatherRealPrepareRequest struct {
+	ShowPath                 string `json:"showPath"`
+	Stage2RecommendedTarget  string `json:"stage2RecommendedTarget,omitempty"`
+	Stage2EstimatedMoveBytes uint64 `json:"stage2EstimatedMoveBytes,omitempty"`
+}
+
+// AutoGatherRealPrepareResult is returned by PREPARE and embedded in session
+// state while a preparation remains valid (~5 minutes).
+type AutoGatherRealPrepareResult struct {
+	PreparationID             string   `json:"preparationId"`
+	ShowPath                  string   `json:"showPath"`
+	ShowName                  string   `json:"showName,omitempty"`
+	SourceDisks               []string `json:"sourceDisks,omitempty"`
+	CanonicalTargetDisk       string   `json:"canonicalTargetDisk,omitempty"`
+	Stage2RecommendedTarget   string   `json:"stage2RecommendedTarget,omitempty"`
+	Stage2AgreesWithCanonical bool     `json:"stage2AgreesWithCanonical"`
+	CurrentBytesOnTarget      uint64   `json:"currentBytesOnTarget,omitempty"`
+	EstimatedMoveBytes        uint64   `json:"estimatedMoveBytes,omitempty"`
+	TargetFreeBytes           uint64   `json:"targetFreeBytes,omitempty"`
+	ProjectedTargetFreeBytes  uint64   `json:"projectedTargetFreeBytes,omitempty"`
+	Executable                bool     `json:"executable"`
+	Issues                    []string `json:"issues,omitempty"`
+	EmptyFolderOnlyDisks      []string `json:"emptyFolderOnlyDisks,omitempty"`
+	ExpiresAt                 string   `json:"expiresAt,omitempty"`
+	GlobalDryRun              bool     `json:"globalDryRun"`
+	Error                     string   `json:"error,omitempty"`
+	PlanFingerprint           *AutoGatherRealPlanFingerprint `json:"planFingerprint,omitempty"`
+}
+
+// AutoGatherRealPlanTransferItem identifies one executable Gather rsync command
+// derived from the target Bin (same normalization as createGatherOperation).
+type AutoGatherRealPlanTransferItem struct {
+	SourceDisk string `json:"sourceDisk"`
+	Entry      string `json:"entry"`
+	Size       uint64 `json:"size"`
+}
+
+// AutoGatherRealPlanFingerprint captures the substantive operation reviewed at
+// PREPARE time. EXECUTE compares a fresh fingerprint; any mismatch refuses
+// without rsync or deletion.
+type AutoGatherRealPlanFingerprint struct {
+	ShowPath    string                           `json:"showPath"`
+	TargetDisk  string                           `json:"targetDisk"`
+	TargetPath  string                           `json:"targetPath"`
+	MoveBytes   uint64                           `json:"moveBytes"`
+	SourceDisks []string                         `json:"sourceDisks,omitempty"`
+	Items       []AutoGatherRealPlanTransferItem `json:"items,omitempty"`
+}
+
+// AutoGatherRealPreparedMove is the in-memory preparation record validated at
+// EXECUTE time. Lost on daemon restart.
+type AutoGatherRealPreparedMove struct {
+	PreparationID       string
+	ShowPath            string
+	ShowName            string
+	PreparedTargetDisk  string
+	PreparedTargetPath  string
+	EstimatedMoveBytes  uint64
+	SourceDisks         []string
+	Stage2Target        string
+	PreparedAt          string
+	ExpiresAt           string
+	PlanFingerprint     AutoGatherRealPlanFingerprint
+	PrepareSnapshot     AutoGatherRealPrepareResult
+}
+
+// AutoGatherRealExecuteRequest requires an explicit confirmation flag and must
+// match the active preparation token and show path.
+type AutoGatherRealExecuteRequest struct {
+	PreparationID string `json:"preparationId"`
+	ShowPath      string `json:"showPath"`
+	Confirm       bool   `json:"confirm"`
+}
+
+// AutoGatherRealVerification summarizes post-move placement for the selected show.
+type AutoGatherRealVerification struct {
+	Passed              bool     `json:"passed"`
+	TargetDisk          string   `json:"targetDisk,omitempty"`
+	SubstantiveDisks    []string `json:"substantiveDisks,omitempty"`
+	EmptyFolderRemnants []string `json:"emptyFolderRemnants,omitempty"`
+	Message             string   `json:"message,omitempty"`
+}
+
+// AutoGatherRealState is the in-memory Stage 3C one-show real execution status.
+type AutoGatherRealState struct {
+	Phase            string                      `json:"phase"`
+	GlobalDryRun     bool                        `json:"globalDryRun"`
+	CurrentShow      string                      `json:"currentShow,omitempty"`
+	CurrentShowName  string                      `json:"currentShowName,omitempty"`
+	CurrentTarget    string                      `json:"currentTarget,omitempty"`
+	OperationPhase   string                      `json:"operationPhase,omitempty"`
+	PreparationID    string                      `json:"preparationId,omitempty"`
+	Prepared         *AutoGatherRealPrepareResult `json:"prepared,omitempty"`
+	Verification     *AutoGatherRealVerification `json:"verification,omitempty"`
+	StartedAt        string                      `json:"startedAt,omitempty"`
+	EndedAt          string                      `json:"endedAt,omitempty"`
+	Error            string                      `json:"error,omitempty"`
+	Message          string                      `json:"message,omitempty"`
+	StoppedMessage   string                      `json:"stoppedMessage,omitempty"`
+}
