@@ -54,6 +54,9 @@ export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
   );
 }
 
+export const AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE =
+  'Global dry-run is enabled. Real execution is disabled until global dry-run mode is turned off.';
+
 export function isAutoGatherRealPrepareExpired(
   expiresAt?: string | null,
   nowMs: number = Date.now(),
@@ -84,6 +87,34 @@ export function shouldShowAutoGatherRealConfirmPanel(
   return true;
 }
 
+export function autoGatherRealPlanHasIssues(
+  prepared?: AutoGatherRealPrepareResult | null,
+): boolean {
+  return (prepared?.issues?.length || 0) > 0;
+}
+
+export function autoGatherRealNonExecutableExplanation(
+  prepared?: AutoGatherRealPrepareResult | null,
+): string | null {
+  if (!prepared) {
+    return null;
+  }
+  if (prepared.executable && !autoGatherRealPlanHasIssues(prepared)) {
+    return null;
+  }
+  const issues = (prepared.issues || []).filter((issue) => issue.trim() !== '');
+  if (issues.length > 0) {
+    return (
+      `Cannot execute this move. Gather planning found: ${issues.join('; ')}. ` +
+      'Choose another show or resolve the Gather issues.'
+    );
+  }
+  return (
+    'Cannot execute this move. Gather planning found issues that prevent ' +
+    'execution. Choose another show or resolve the Gather issues.'
+  );
+}
+
 export function canConfirmAutoGatherRealMove(opts: {
   globalDryRun: boolean;
   busy?: boolean;
@@ -95,6 +126,9 @@ export function canConfirmAutoGatherRealMove(opts: {
     return false;
   }
   if (!opts.prepared?.preparationId || !opts.prepared.executable) {
+    return false;
+  }
+  if (autoGatherRealPlanHasIssues(opts.prepared)) {
     return false;
   }
   if (isAutoGatherRealPrepareExpired(opts.prepared.expiresAt, opts.nowMs)) {

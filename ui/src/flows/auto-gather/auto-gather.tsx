@@ -18,6 +18,8 @@ import {
 import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
 import {
+  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
+  autoGatherRealNonExecutableExplanation,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
   isAutoGatherRealExpiredPhase,
@@ -715,6 +717,8 @@ export const AutoGather: React.FunctionComponent = () => {
     prepared: preparedMove,
   });
   const cancelEnabled = canCancelAutoGatherRealPrepare(realState);
+  const nonExecutableExplanation =
+    autoGatherRealNonExecutableExplanation(preparedMove);
 
   React.useEffect(() => {
     syncAutoGatherDryRun(dryRunActive);
@@ -816,8 +820,7 @@ export const AutoGather: React.FunctionComponent = () => {
           </p>
           {globalDryRun && (
             <p className="text-xs text-red-800 dark:text-red-300 mt-2 font-medium">
-              Global dry-run is enabled. Real execution is disabled until you turn
-              it off in Settings.
+              {AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE}
             </p>
           )}
           {preparedMove && showConfirmPanel && (
@@ -837,9 +840,9 @@ export const AutoGather: React.FunctionComponent = () => {
                 Projected target free:{' '}
                 {humanBytes(preparedMove.projectedTargetFreeBytes || 0)}
               </div>
-              {(preparedMove.issues?.length || 0) > 0 && (
-                <div className="text-amber-800 dark:text-amber-300">
-                  Issues: {preparedMove.issues!.join('; ')}
+              {nonExecutableExplanation && (
+                <div className="font-medium text-red-800 dark:text-red-200">
+                  {nonExecutableExplanation}
                 </div>
               )}
               {(preparedMove.emptyFolderOnlyDisks?.length || 0) > 0 && (

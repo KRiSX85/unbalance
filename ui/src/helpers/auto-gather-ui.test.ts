@@ -3,6 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
+  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
+  autoGatherRealNonExecutableExplanation,
   headerShowsBusy,
   isAutoGatherRealActivePhase,
   isAutoGatherStopEnabled,
@@ -131,6 +133,17 @@ function preparedStatus(
   };
 }
 
+describe('Auto Gather Stage 3C dry-run wording', () => {
+  it('does not tell the user to disable global dry-run in Settings', () => {
+    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE).toBe(
+      'Global dry-run is enabled. Real execution is disabled until global dry-run mode is turned off.',
+    );
+    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE.toLowerCase()).not.toContain(
+      'settings',
+    );
+  });
+});
+
 describe('Auto Gather Stage 3C confirmation recovery', () => {
   it('restores the full confirmation panel from server prepared status after reload', () => {
     const status = preparedStatus();
@@ -226,5 +239,91 @@ describe('Auto Gather Stage 3C confirmation recovery', () => {
       }),
     ).toBe(false);
     expect(canCancelAutoGatherRealPrepare(status)).toBe(false);
+  });
+});
+
+describe('Auto Gather Stage 3C non-executable confirmation', () => {
+  const thousandBlowsIssues = ['5 folder issue(s)', '12 file issue(s)'];
+  const expectedExplanation =
+    'Cannot execute this move. Gather planning found: 5 folder issue(s); 12 file issue(s). Choose another show or resolve the Gather issues.';
+
+  function nonExecutableStatus(): AutoGatherRealState {
+    const base = preparedStatus({ globalDryRun: false });
+    return {
+      ...base,
+      currentShow: 'data/media/tv/A Thousand Blows (2025)',
+      currentShowName: 'A Thousand Blows (2025)',
+      currentTarget: 'disk4',
+      prepared: {
+        ...base.prepared!,
+        showPath: 'data/media/tv/A Thousand Blows (2025)',
+        showName: 'A Thousand Blows (2025)',
+        canonicalTargetDisk: 'disk4',
+        stage2RecommendedTarget: 'disk4',
+        estimatedMoveBytes: 2623052978,
+        executable: false,
+        issues: thousandBlowsIssues,
+        globalDryRun: false,
+      },
+    };
+  }
+
+  it('keeps Confirm disabled when DRY_RUN is off but the plan is not executable', () => {
+    const status = nonExecutableStatus();
+    expect(shouldShowAutoGatherRealConfirmPanel(status)).toBe(true);
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: false,
+        prepared: status.prepared,
+      }),
+    ).toBe(false);
+    expect(canCancelAutoGatherRealPrepare(status)).toBe(true);
+  });
+
+  it('may enable Confirm when DRY_RUN is off and the prepared plan is executable with no issues', () => {
+    const status = preparedStatus({ globalDryRun: false });
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: false,
+        prepared: status.prepared,
+      }),
+    ).toBe(true);
+    expect(autoGatherRealNonExecutableExplanation(status.prepared)).toBeNull();
+  });
+
+  it('restores the non-executable explanation from /real/status after browser refresh', () => {
+    const recovered = nonExecutableStatus();
+    expect(shouldShowAutoGatherRealConfirmPanel(recovered)).toBe(true);
+    expect(autoGatherRealNonExecutableExplanation(recovered.prepared)).toBe(
+      expectedExplanation,
+    );
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: false,
+        prepared: recovered.prepared,
+      }),
+    ).toBe(false);
+    expect(canCancelAutoGatherRealPrepare(recovered)).toBe(true);
+  });
+
+  it('keeps Confirm disabled if plan issues are present even when executable is true', () => {
+    const status = preparedStatus({
+      globalDryRun: false,
+      prepared: {
+        ...preparedStatus().prepared!,
+        executable: true,
+        issues: ['1 file issue(s)'],
+        globalDryRun: false,
+      },
+    });
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: false,
+        prepared: status.prepared,
+      }),
+    ).toBe(false);
+    expect(autoGatherRealNonExecutableExplanation(status.prepared)).toContain(
+      '1 file issue(s)',
+    );
   });
 });
