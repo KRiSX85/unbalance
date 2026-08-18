@@ -2,6 +2,8 @@ package core
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"unbalance/daemon/common"
 	"unbalance/daemon/domain"
+	"unbalance/daemon/lib"
 )
 
 func newCoreForRealTest() *Core {
@@ -125,6 +128,114 @@ func TestStage3CExecuteRefusesWhileGlobalDryRunTrue(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "global dry-run") {
 		t.Fatalf("execute must refuse under global dry-run, err=%v", err)
+	}
+}
+
+func TestStage3CStatusGlobalDryRunFollowsConfig(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		c := newCoreForRealTest()
+		c.ctx.DryRun = want
+		state := c.GetAutoGatherRealState()
+		if state.GlobalDryRun != want {
+			t.Fatalf("status globalDryRun=%v, want %v", state.GlobalDryRun, want)
+		}
+	}
+}
+
+func TestStage3CStatusGlobalDryRunFollowsPersistedEnvFile(t *testing.T) {
+	for _, want := range []bool{true, false} {
+		c := newCoreForRealTest()
+		c.ctx.DryRun = !want
+		envFile := filepath.Join(t.TempDir(), "unbalanced.env")
+		content := "DRY_RUN=false\n"
+		if want {
+			content = "DRY_RUN=true\n"
+		}
+		if err := os.WriteFile(envFile, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := lib.ApplyPersistedEnv(envFile, &c.ctx.Config); err != nil {
+			t.Fatalf("ApplyPersistedEnv: %s", err)
+		}
+		state := c.GetAutoGatherRealState()
+		if state.GlobalDryRun != want {
+			t.Fatalf("after env file DRY_RUN=%v, status globalDryRun=%v", want, state.GlobalDryRun)
+		}
+		if c.ctx.DryRun != want {
+			t.Fatalf("ctx.DryRun=%v, want %v", c.ctx.DryRun, want)
+		}
+	}
+}
+
+func TestStage3CMalformedEnvDryRunKeepsSafeDefault(t *testing.T) {
+	c := newCoreForRealTest()
+	c.ctx.DryRun = true
+	envFile := filepath.Join(t.TempDir(), "unbalanced.env")
+	if err := os.WriteFile(envFile, []byte("DRY_RUN=maybe\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.ApplyPersistedEnv(envFile, &c.ctx.Config); err != nil {
+		t.Fatal(err)
+	}
+	if !c.ctx.DryRun {
+		t.Fatal("unparseable DRY_RUN must not disable global dry-run")
+	}
+	if !c.GetAutoGatherRealState().GlobalDryRun {
+		t.Fatal("status must still report globalDryRun=true")
+	}
+	defer installRealCanonicalStub("data/media/tv/A", "disk1", 100)()
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	_, err := c.ExecuteAutoGatherReal(domain.AutoGatherRealExecuteRequest{
+		PreparationID: prep.PreparationID, ShowPath: "data/media/tv/A", Confirm: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "global dry-run") {
+		t.Fatalf("malformed DRY_RUN must not allow execute, err=%v", err)
+	}
+}
+
+func TestStage3CExecuteDryRunGateDoesNotRefuseWhenConfigFalse(t *testing.T) {
+	c := newCoreForRealTest()
+	c.ctx.DryRun = true
+	envFile := filepath.Join(t.TempDir(), "unbalanced.env")
+	if err := os.WriteFile(envFile, []byte("DRY_RUN=false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.ApplyPersistedEnv(envFile, &c.ctx.Config); err != nil {
+		t.Fatal(err)
+	}
+	if c.ctx.DryRun {
+		t.Fatal("loaded DRY_RUN=false must clear the global dry-run gate")
+	}
+	defer installRealCanonicalStub("data/media/tv/A", "disk1", 100)()
+	var execCount int32
+	prevExec := autoGatherRealExecuteHook
+	autoGatherRealExecuteHook = func(c *Core, plan *domain.Plan, targetPath string) gatherExecResult {
+		atomic.AddInt32(&execCount, 1)
+		return gatherExecResult{outcome: gatherExecSuccess}
+	}
+	defer func() { autoGatherRealExecuteHook = prevExec }()
+	prevVerify := autoGatherRealVerifyHook
+	autoGatherRealVerifyHook = func(c *Core, showPath, targetDisk string) domain.AutoGatherRealVerification {
+		return domain.AutoGatherRealVerification{Passed: true}
+	}
+	defer func() { autoGatherRealVerifyHook = prevVerify }()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	_, err := c.ExecuteAutoGatherReal(domain.AutoGatherRealExecuteRequest{
+		PreparationID: prep.PreparationID, ShowPath: "data/media/tv/A", Confirm: true,
+	})
+	if err != nil && strings.Contains(err.Error(), "global dry-run") {
+		t.Fatalf("DRY_RUN=false must not trip the global dry-run execute gate: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if atomic.LoadInt32(&execCount) != 1 {
+		t.Fatalf("expected execute to proceed past the dry-run gate, execCount=%d err=%v", execCount, err)
 	}
 }
 
@@ -675,6 +786,22 @@ func TestStage3BDryRunStartStillRequiresGlobalDryRun(t *testing.T) {
 	_, err := c.StartAutoGatherDryRun()
 	if err == nil {
 		t.Fatal("Stage 3B must still require global dry-run")
+	}
+}
+
+func TestStage3BStillRequiresGlobalDryRunAfterEnvFileFalse(t *testing.T) {
+	c := newCoreForRealTest()
+	c.ctx.DryRun = true
+	envFile := filepath.Join(t.TempDir(), "unbalanced.env")
+	if err := os.WriteFile(envFile, []byte("DRY_RUN=false\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := lib.ApplyPersistedEnv(envFile, &c.ctx.Config); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.StartAutoGatherDryRun()
+	if err == nil || !strings.Contains(err.Error(), "global dry-run") {
+		t.Fatalf("Stage 3B must still require DRY_RUN=true after env file overlay, err=%v", err)
 	}
 }
 

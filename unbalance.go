@@ -20,7 +20,9 @@ var cli struct {
 	LogsDir string `name:"logs-dir" env:"UNBALANCED_LOGS_DIR" default:"/var/log" help:"directory to store logs"`
 	DataDir string `name:"data-dir" env:"UNBALANCED_DATA_DIR" default:"" help:"directory for mutable state (env, history, sessions); defaults to the official plugin path"`
 
-	// Config vars
+	// Config vars. Kong may initialize these from process environment or
+	// defaults (DRY_RUN defaults to true). After path resolution, data-dir
+	// unbalanced.env overlays present keys and is the runtime source of truth.
 	DryRun         bool     `env:"DRY_RUN" default:"true" help:"perform a dry-run rather than actual work"`
 	NotifyPlan     int      `env:"NOTIFY_PLAN" default:"0" help:"notify via email after plan operation has completed (unraid notifications must be set up first): 0 - No notifications; 1 - Simple notifications; 2 - Detailed notifications"`
 	NotifyTransfer int      `env:"NOTIFY_TRANSFER" default:"0" help:"notify via email after transfer operation has completed (unraid notifications must be set up first): 0 - No notifications; 1 - Simple notifications; 2 - Detailed notifications"`
@@ -78,6 +80,31 @@ func main() {
 		log.Printf("warning: unable to stat env file %s: %s", paths.EnvFile, statErr)
 	}
 
+	config := domain.Config{
+		Version:        Version,
+		DryRun:         cli.DryRun,
+		NotifyPlan:     cli.NotifyPlan,
+		NotifyTransfer: cli.NotifyTransfer,
+		ReservedAmount: cli.ReservedAmount,
+		ReservedUnit:   cli.ReservedUnit,
+		RsyncArgs:      cli.RsyncArgs,
+		Verbosity:      cli.Verbosity,
+		RefreshRate:    cli.RefreshRate,
+		LogLines:       cli.LogLines,
+		SpeedWindow:    cli.SpeedWindow,
+		TvLibraryPath:  cli.TvLibraryPath,
+		AuthEnabled:    cli.AuthEnabled,
+		AuthUsername:   cli.AuthUsername,
+		AuthPassword:   cli.AuthPassword,
+	}
+	if err := lib.ApplyPersistedEnv(paths.EnvFile, &config); err != nil {
+		log.Printf("warning: unable to load env file %s: %s", paths.EnvFile, err)
+	} else {
+		cli.DryRun = config.DryRun
+		cli.TvLibraryPath = config.TvLibraryPath
+		cli.AuthPassword = config.AuthPassword
+	}
+
 	dataDirLog := cli.DataDir
 	if dataDirLog == "" {
 		dataDirLog = "(default)"
@@ -98,24 +125,8 @@ func main() {
 		LogsDir: paths.LogsDir,
 		DataDir: paths.DataDir,
 		Paths:   paths,
-		Config: domain.Config{
-			Version:        Version,
-			DryRun:         cli.DryRun,
-			NotifyPlan:     cli.NotifyPlan,
-			NotifyTransfer: cli.NotifyTransfer,
-			ReservedAmount: cli.ReservedAmount,
-			ReservedUnit:   cli.ReservedUnit,
-			RsyncArgs:      cli.RsyncArgs,
-			Verbosity:      cli.Verbosity,
-			RefreshRate:    cli.RefreshRate,
-			LogLines:       cli.LogLines,
-			SpeedWindow:    cli.SpeedWindow,
-			TvLibraryPath:  cli.TvLibraryPath,
-			AuthEnabled:    cli.AuthEnabled,
-			AuthUsername:   cli.AuthUsername,
-			AuthPassword:   cli.AuthPassword,
-		},
-		Hub: pubsub.New(23),
+		Config:  config,
+		Hub:     pubsub.New(23),
 	})
 	kctx.FatalIfErrorf(err)
 }

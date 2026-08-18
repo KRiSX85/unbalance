@@ -167,6 +167,31 @@ func LoadAuthHash(location string) (string, error) {
 	return file.Section("").Key("AUTH_PASSWORD_HASH").String(), nil
 }
 
+// ApplyPersistedEnv overlays data-dir unbalanced.env onto config when the file
+// exists. Missing files leave config unchanged (Kong CLI/env/defaults remain).
+//
+// Precedence for DRY_RUN and other persisted keys:
+//  1. unbalanced.env in the resolved data directory, when the key is present
+//     and parseable. This is the runtime source of truth (ToggleDryRun writes it).
+//  2. Kong process environment (env:"DRY_RUN") and CLI, used only as the
+//     initial value before overlay / when the file or key is absent.
+//  3. Kong default (DRY_RUN defaults to true).
+//
+// A process environment DRY_RUN value does not override a present file key.
+func ApplyPersistedEnv(location string, config *domain.Config) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+	_, err := os.Stat(location)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return LoadEnv(location, config)
+}
+
 func LoadEnv(location string, config *domain.Config) error {
 	// load file
 	file, err := ini.Load(location)
@@ -175,18 +200,61 @@ func LoadEnv(location string, config *domain.Config) error {
 	}
 	_ = os.Chmod(location, 0o600)
 
-	// fill data
-	config.DryRun, _ = file.Section("").Key("DRY_RUN").Bool()
-	config.NotifyPlan, _ = file.Section("").Key("NOTIFY_PLAN").Int()
-	config.NotifyTransfer, _ = file.Section("").Key("NOTIFY_TRANSFER").Int()
-	config.ReservedAmount, _ = file.Section("").Key("RESERVED_AMOUNT").Uint64()
-	config.ReservedUnit = file.Section("").Key("RESERVED_UNIT").String()
-	config.RsyncArgs = file.Section("").Key("RSYNC_ARGS").Strings(",")
-	config.Verbosity, _ = file.Section("").Key("VERBOSITY").Int()
-	config.RefreshRate, _ = file.Section("").Key("REFRESH_RATE").Int()
-	config.SpeedWindow = file.Section("").Key("SPEED_WINDOW").MustString("90s")
-	config.TvLibraryPath = file.Section("").Key("TV_LIBRARY_PATH").MustString("data/media/tv")
-	config.AuthPassword = file.Section("").Key("AUTH_PASSWORD_HASH").String()
+	sec := file.Section("")
+	if key, err := sec.GetKey("DRY_RUN"); err == nil {
+		if v, parseErr := key.Bool(); parseErr == nil {
+			config.DryRun = v
+		}
+	}
+	if key, err := sec.GetKey("NOTIFY_PLAN"); err == nil {
+		if v, parseErr := key.Int(); parseErr == nil {
+			config.NotifyPlan = v
+		}
+	}
+	if key, err := sec.GetKey("NOTIFY_TRANSFER"); err == nil {
+		if v, parseErr := key.Int(); parseErr == nil {
+			config.NotifyTransfer = v
+		}
+	}
+	if key, err := sec.GetKey("RESERVED_AMOUNT"); err == nil {
+		if v, parseErr := key.Uint64(); parseErr == nil {
+			config.ReservedAmount = v
+		}
+	}
+	if key, err := sec.GetKey("RESERVED_UNIT"); err == nil {
+		config.ReservedUnit = key.String()
+	}
+	if key, err := sec.GetKey("RSYNC_ARGS"); err == nil {
+		config.RsyncArgs = key.Strings(",")
+	}
+	if key, err := sec.GetKey("VERBOSITY"); err == nil {
+		if v, parseErr := key.Int(); parseErr == nil {
+			config.Verbosity = v
+		}
+	}
+	if key, err := sec.GetKey("REFRESH_RATE"); err == nil {
+		if v, parseErr := key.Int(); parseErr == nil {
+			config.RefreshRate = v
+		}
+	}
+	if key, err := sec.GetKey("LOG_LINES"); err == nil {
+		if v, parseErr := key.Int(); parseErr == nil {
+			config.LogLines = v
+		}
+	}
+	if key, err := sec.GetKey("SPEED_WINDOW"); err == nil {
+		if v := strings.TrimSpace(key.String()); v != "" {
+			config.SpeedWindow = v
+		}
+	}
+	if key, err := sec.GetKey("TV_LIBRARY_PATH"); err == nil {
+		if v := strings.TrimSpace(key.String()); v != "" {
+			config.TvLibraryPath = v
+		}
+	}
+	if key, err := sec.GetKey("AUTH_PASSWORD_HASH"); err == nil {
+		config.AuthPassword = key.String()
+	}
 
 	return nil
 }
