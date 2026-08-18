@@ -116,7 +116,8 @@ func (c *Core) PrepareAutoGatherReal(req domain.AutoGatherRealPrepareRequest) do
 
 	sourceDisks := sourceDisksFromGatherPlan(bundle.Plan, targetPath)
 	emptyFolders := c.emptyFolderOnlyDisksForShow(showPath)
-	issues := gatherPlanIssues(bundle.Plan)
+	permWarnings := gatherPlanPermissionWarnings(bundle.Plan)
+	blockingIssues := gatherPlanBlockingIssues(bundle.Plan, targetPath)
 	currentOnTarget := currentBytesOnTarget(canonical, targetDisk)
 	targetMeta := lookupCanonicalTargetMeta(canonical, targetDisk)
 	fingerprint, fpErr := buildAutoGatherRealPlanFingerprint(showPath, targetDisk, targetPath, bundle.Plan)
@@ -145,8 +146,9 @@ func (c *Core) PrepareAutoGatherReal(req domain.AutoGatherRealPrepareRequest) do
 		EstimatedMoveBytes:        bundle.Plan.VDisks[targetPath].Bin.Size,
 		TargetFreeBytes:           targetMeta.FreeBytes,
 		ProjectedTargetFreeBytes:  targetMeta.ProjectedFreeBytes,
-		Executable:                len(issues) == 0 && bundle.Plan.VDisks[targetPath].Bin != nil && len(bundle.Plan.VDisks[targetPath].Bin.Items) > 0,
-		Issues:                    issues,
+		Executable:                isAutoGatherRealPlanStructurallyExecutable(bundle.Plan, targetPath),
+		Issues:                    blockingIssues,
+		PermissionWarnings:        permWarnings,
 		EmptyFolderOnlyDisks:      emptyFolders,
 		ExpiresAt:                 expires.Format(time.RFC3339),
 		GlobalDryRun:              c.ctx.DryRun,
@@ -181,6 +183,9 @@ func (c *Core) PrepareAutoGatherReal(req domain.AutoGatherRealPrepareRequest) do
 	c.autoGatherRealState.GlobalDryRun = c.ctx.DryRun
 	c.autoGatherRealState.Message = autoGatherRealMessage
 	c.autoGatherRealState.Error = ""
+	c.autoGatherRealState.Verification = nil
+	c.autoGatherRealState.EndedAt = ""
+	c.autoGatherRealState.StoppedMessage = ""
 
 	autoGatherRealLog("prepared show=%s target=%s id=%s", showPath, targetDisk, prepID)
 	return result
@@ -383,10 +388,6 @@ func (c *Core) autoGatherRealExecuteAsync(prepared *domain.AutoGatherRealPrepare
 	}
 	if err := validateAutoGatherGatherTarget(bundle.Plan, targetPath); err != nil {
 		c.finalizeAutoGatherRealFailed(err.Error())
-		return
-	}
-	if issues := gatherPlanIssues(bundle.Plan); len(issues) > 0 {
-		c.finalizeAutoGatherRealFailed(strings.Join(issues, "; "))
 		return
 	}
 	if err := c.validateAutoGatherRealExecutionGates(prepared, bundle.Plan, targetPath); err != nil {
@@ -769,24 +770,38 @@ func transferItemsEqual(a, b []domain.AutoGatherRealPlanTransferItem) bool {
 	return true
 }
 
-func gatherPlanIssues(plan *domain.Plan) []string {
+func gatherPlanPermissionWarnings(plan *domain.Plan) *domain.AutoGatherRealPermissionWarnings {
+	if plan == nil {
+		return nil
+	}
+	w := domain.AutoGatherRealPermissionWarnings{
+		OwnerIssues:  plan.OwnerIssue,
+		GroupIssues:  plan.GroupIssue,
+		FolderIssues: plan.FolderIssue,
+		FileIssues:   plan.FileIssue,
+	}
+	if w.OwnerIssues == 0 && w.GroupIssues == 0 && w.FolderIssues == 0 && w.FileIssues == 0 {
+		return nil
+	}
+	return &w
+}
+
+func isAutoGatherRealPlanStructurallyExecutable(plan *domain.Plan, targetPath string) bool {
+	if plan == nil {
+		return false
+	}
+	vdisk := plan.VDisks[targetPath]
+	return vdisk != nil && vdisk.Bin != nil && len(vdisk.Bin.Items) > 0
+}
+
+func gatherPlanBlockingIssues(plan *domain.Plan, targetPath string) []string {
 	if plan == nil {
 		return []string{"missing gather plan"}
 	}
-	issues := make([]string, 0)
-	if plan.OwnerIssue > 0 {
-		issues = append(issues, fmt.Sprintf("%d ownership issue(s)", plan.OwnerIssue))
+	if isAutoGatherRealPlanStructurallyExecutable(plan, targetPath) {
+		return nil
 	}
-	if plan.GroupIssue > 0 {
-		issues = append(issues, fmt.Sprintf("%d group issue(s)", plan.GroupIssue))
-	}
-	if plan.FolderIssue > 0 {
-		issues = append(issues, fmt.Sprintf("%d folder issue(s)", plan.FolderIssue))
-	}
-	if plan.FileIssue > 0 {
-		issues = append(issues, fmt.Sprintf("%d file issue(s)", plan.FileIssue))
-	}
-	return issues
+	return []string{"canonical Gather target has no executable items"}
 }
 
 func currentBytesOnTarget(canonical domain.AutoGatherCanonicalPlanResult, targetDisk string) uint64 {

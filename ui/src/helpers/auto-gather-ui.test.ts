@@ -5,6 +5,7 @@ import { getRouteFromStatus } from '~/helpers/routes';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
   autoGatherRealNonExecutableExplanation,
+  autoGatherRealPermissionWarningMessage,
   headerShowsBusy,
   isAutoGatherRealActivePhase,
   isAutoGatherStopEnabled,
@@ -243,9 +244,9 @@ describe('Auto Gather Stage 3C confirmation recovery', () => {
 });
 
 describe('Auto Gather Stage 3C non-executable confirmation', () => {
-  const thousandBlowsIssues = ['5 folder issue(s)', '12 file issue(s)'];
+  const structuralIssues = ['canonical Gather target has no executable items'];
   const expectedExplanation =
-    'Cannot execute this move. Gather planning found: 5 folder issue(s); 12 file issue(s). Choose another show or resolve the Gather issues.';
+    'Cannot execute this move. Gather planning found: canonical Gather target has no executable items. Choose another show or resolve the Gather issues.';
 
   function nonExecutableStatus(): AutoGatherRealState {
     const base = preparedStatus({ globalDryRun: false });
@@ -262,7 +263,7 @@ describe('Auto Gather Stage 3C non-executable confirmation', () => {
         stage2RecommendedTarget: 'disk4',
         estimatedMoveBytes: 2623052978,
         executable: false,
-        issues: thousandBlowsIssues,
+        issues: structuralIssues,
         globalDryRun: false,
       },
     };
@@ -280,7 +281,7 @@ describe('Auto Gather Stage 3C non-executable confirmation', () => {
     expect(canCancelAutoGatherRealPrepare(status)).toBe(true);
   });
 
-  it('may enable Confirm when DRY_RUN is off and the prepared plan is executable with no issues', () => {
+  it('may enable Confirm when DRY_RUN is off and the prepared plan is executable with no warnings', () => {
     const status = preparedStatus({ globalDryRun: false });
     expect(
       canConfirmAutoGatherRealMove({
@@ -305,14 +306,38 @@ describe('Auto Gather Stage 3C non-executable confirmation', () => {
     ).toBe(false);
     expect(canCancelAutoGatherRealPrepare(recovered)).toBe(true);
   });
+});
 
-  it('keeps Confirm disabled if plan issues are present even when executable is true', () => {
+describe('Auto Gather Stage 3C permission warnings', () => {
+  it('formats permission warning counts for the confirmation panel', () => {
+    expect(
+      autoGatherRealPermissionWarningMessage({
+        folderIssues: 26,
+        fileIssues: 38,
+      }),
+    ).toBe(
+      'Gather permission warnings: 26 folder(s); 38 file(s). These are legacy unbalanced permission checks and do not prevent Gather execution.',
+    );
+    expect(
+      autoGatherRealPermissionWarningMessage({
+        ownerIssues: 2,
+        groupIssues: 1,
+      }),
+    ).toBe(
+      'Gather permission warnings: 2 owner(s); 1 group(s). These are legacy unbalanced permission checks and do not prevent Gather execution.',
+    );
+  });
+
+  it('allows Confirm when only permission warnings are present', () => {
     const status = preparedStatus({
       globalDryRun: false,
       prepared: {
         ...preparedStatus().prepared!,
         executable: true,
-        issues: ['1 file issue(s)'],
+        permissionWarnings: {
+          folderIssues: 26,
+          fileIssues: 38,
+        },
         globalDryRun: false,
       },
     });
@@ -321,9 +346,52 @@ describe('Auto Gather Stage 3C non-executable confirmation', () => {
         globalDryRun: false,
         prepared: status.prepared,
       }),
+    ).toBe(true);
+    expect(autoGatherRealNonExecutableExplanation(status.prepared)).toBeNull();
+    expect(
+      autoGatherRealPermissionWarningMessage(status.prepared?.permissionWarnings),
+    ).toContain('26 folder(s); 38 file(s)');
+  });
+
+  it('keeps Confirm disabled when DRY_RUN is true even with permission warnings only', () => {
+    const status = preparedStatus({
+      prepared: {
+        ...preparedStatus().prepared!,
+        executable: true,
+        permissionWarnings: { folderIssues: 5 },
+      },
+    });
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: true,
+        prepared: status.prepared,
+      }),
     ).toBe(false);
-    expect(autoGatherRealNonExecutableExplanation(status.prepared)).toContain(
-      '1 file issue(s)',
-    );
+  });
+
+  it('retains permission warnings and correct Confirm gating after recovered prepared state', () => {
+    const status = preparedStatus({
+      globalDryRun: false,
+      prepared: {
+        ...preparedStatus().prepared!,
+        executable: true,
+        permissionWarnings: {
+          ownerIssues: 1,
+          folderIssues: 3,
+          fileIssues: 4,
+        },
+        globalDryRun: false,
+      },
+    });
+    expect(shouldShowAutoGatherRealConfirmPanel(status)).toBe(true);
+    expect(
+      canConfirmAutoGatherRealMove({
+        globalDryRun: false,
+        prepared: status.prepared,
+      }),
+    ).toBe(true);
+    expect(
+      autoGatherRealPermissionWarningMessage(status.prepared?.permissionWarnings),
+    ).toContain('1 owner(s); 3 folder(s); 4 file(s)');
   });
 });

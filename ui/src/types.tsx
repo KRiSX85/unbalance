@@ -164,10 +164,18 @@ export interface AutoGatherRealPrepareResult {
   projectedTargetFreeBytes?: number;
   executable: boolean;
   issues?: string[];
+  permissionWarnings?: AutoGatherRealPermissionWarnings;
   emptyFolderOnlyDisks?: string[];
   expiresAt?: string;
   globalDryRun: boolean;
   error?: string;
+}
+
+export interface AutoGatherRealPermissionWarnings {
+  ownerIssues?: number;
+  groupIssues?: number;
+  folderIssues?: number;
+  fileIssues?: number;
 }
 
 export interface AutoGatherRealVerification {

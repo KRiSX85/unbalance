@@ -214,11 +214,22 @@ type AutoGatherRealPrepareResult struct {
 	ProjectedTargetFreeBytes  uint64   `json:"projectedTargetFreeBytes,omitempty"`
 	Executable                bool     `json:"executable"`
 	Issues                    []string `json:"issues,omitempty"`
+	PermissionWarnings        *AutoGatherRealPermissionWarnings `json:"permissionWarnings,omitempty"`
 	EmptyFolderOnlyDisks      []string `json:"emptyFolderOnlyDisks,omitempty"`
 	ExpiresAt                 string   `json:"expiresAt,omitempty"`
 	GlobalDryRun              bool     `json:"globalDryRun"`
 	Error                     string   `json:"error,omitempty"`
 	PlanFingerprint           *AutoGatherRealPlanFingerprint `json:"planFingerprint,omitempty"`
+}
+
+// AutoGatherRealPermissionWarnings surfaces legacy Gather planner permission
+// diagnostics (owner/group/folder/file). Upstream unbalanced treats these as
+// warnings during planning; they do not by themselves block Gather execution.
+type AutoGatherRealPermissionWarnings struct {
+	OwnerIssues  int64 `json:"ownerIssues,omitempty"`
+	GroupIssues  int64 `json:"groupIssues,omitempty"`
+	FolderIssues int64 `json:"folderIssues,omitempty"`
+	FileIssues   int64 `json:"fileIssues,omitempty"`
 }
 
 // AutoGatherRealPlanTransferItem identifies one executable Gather rsync command

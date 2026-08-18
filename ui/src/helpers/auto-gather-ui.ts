@@ -1,4 +1,4 @@
-import { Op, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
+import { Op, AutoGatherRealPermissionWarnings, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 
 export function isAutoGatherDryRunActivePhase(phase?: string | null): boolean {
@@ -87,19 +87,38 @@ export function shouldShowAutoGatherRealConfirmPanel(
   return true;
 }
 
-export function autoGatherRealPlanHasIssues(
-  prepared?: AutoGatherRealPrepareResult | null,
-): boolean {
-  return (prepared?.issues?.length || 0) > 0;
+export function autoGatherRealPermissionWarningMessage(
+  warnings?: AutoGatherRealPermissionWarnings | null,
+): string | null {
+  if (!warnings) {
+    return null;
+  }
+  const parts: string[] = [];
+  if ((warnings.ownerIssues || 0) > 0) {
+    parts.push(`${warnings.ownerIssues} owner(s)`);
+  }
+  if ((warnings.groupIssues || 0) > 0) {
+    parts.push(`${warnings.groupIssues} group(s)`);
+  }
+  if ((warnings.folderIssues || 0) > 0) {
+    parts.push(`${warnings.folderIssues} folder(s)`);
+  }
+  if ((warnings.fileIssues || 0) > 0) {
+    parts.push(`${warnings.fileIssues} file(s)`);
+  }
+  if (parts.length === 0) {
+    return null;
+  }
+  return (
+    `Gather permission warnings: ${parts.join('; ')}. ` +
+    'These are legacy unbalanced permission checks and do not prevent Gather execution.'
+  );
 }
 
 export function autoGatherRealNonExecutableExplanation(
   prepared?: AutoGatherRealPrepareResult | null,
 ): string | null {
-  if (!prepared) {
-    return null;
-  }
-  if (prepared.executable && !autoGatherRealPlanHasIssues(prepared)) {
+  if (!prepared || prepared.executable) {
     return null;
   }
   const issues = (prepared.issues || []).filter((issue) => issue.trim() !== '');
@@ -110,8 +129,7 @@ export function autoGatherRealNonExecutableExplanation(
     );
   }
   return (
-    'Cannot execute this move. Gather planning found issues that prevent ' +
-    'execution. Choose another show or resolve the Gather issues.'
+    'Cannot execute this move. The canonical Gather plan has no executable items.'
   );
 }
 
@@ -126,9 +144,6 @@ export function canConfirmAutoGatherRealMove(opts: {
     return false;
   }
   if (!opts.prepared?.preparationId || !opts.prepared.executable) {
-    return false;
-  }
-  if (autoGatherRealPlanHasIssues(opts.prepared)) {
     return false;
   }
   if (isAutoGatherRealPrepareExpired(opts.prepared.expiresAt, opts.nowMs)) {

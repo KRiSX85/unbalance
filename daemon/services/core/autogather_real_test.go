@@ -1177,3 +1177,176 @@ func TestExpiredPreparedDoesNotRemainSessionActiveAfterStatusRead(t *testing.T) 
 		t.Fatal("status read must inactivate an expired preparation")
 	}
 }
+
+func installRealCanonicalStubWithPermissionWarnings(showPath, target string, move uint64, owner, group, folder, file int64) func() {
+	prev := autoGatherRealCanonicalHook
+	autoGatherRealCanonicalHook = func(c *Core, path, stage2 string, stage2Move uint64) (autoGatherCanonicalBundle, bool) {
+		bundle := stubRealCanonicalBundle(showPath, target, move)
+		bundle.Plan.OwnerIssue = owner
+		bundle.Plan.GroupIssue = group
+		bundle.Plan.FolderIssue = folder
+		bundle.Plan.FileIssue = file
+		return bundle, false
+	}
+	return func() { autoGatherRealCanonicalHook = prev }
+}
+
+func installRealCanonicalStubWithEmptyTargetBin(showPath, target string, move uint64) func() {
+	prev := autoGatherRealCanonicalHook
+	autoGatherRealCanonicalHook = func(c *Core, path, stage2 string, stage2Move uint64) (autoGatherCanonicalBundle, bool) {
+		bundle := stubRealCanonicalBundle(showPath, target, move)
+		targetPath := "/mnt/" + target
+		bundle.Plan.VDisks[targetPath].Bin.Items = nil
+		bundle.Plan.VDisks[targetPath].Bin.Size = 0
+		return bundle, false
+	}
+	return func() { autoGatherRealCanonicalHook = prev }
+}
+
+func TestGatherPlanPermissionWarningsDoNotBlockStructurally(t *testing.T) {
+	targetPath := "/mnt/disk8"
+	plan := stubRealCanonicalBundle("data/media/tv/NCIS - Sydney (2023)", "disk8", 100).Plan
+	plan.OwnerIssue = 0
+	plan.GroupIssue = 0
+	plan.FolderIssue = 26
+	plan.FileIssue = 38
+
+	warnings := gatherPlanPermissionWarnings(plan)
+	if warnings == nil || warnings.FolderIssues != 26 || warnings.FileIssues != 38 {
+		t.Fatalf("permission warnings = %#v", warnings)
+	}
+	if issues := gatherPlanBlockingIssues(plan, targetPath); len(issues) != 0 {
+		t.Fatalf("folder/file warnings must not become blocking issues: %#v", issues)
+	}
+	if !isAutoGatherRealPlanStructurallyExecutable(plan, targetPath) {
+		t.Fatal("plan with permission warnings only must remain structurally executable")
+	}
+}
+
+func TestPrepareExecutableWithPermissionWarningsOnly(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStubWithPermissionWarnings(
+		"data/media/tv/NCIS - Sydney (2023)", "disk8", 100, 0, 0, 26, 38,
+	)()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{
+		ShowPath: "data/media/tv/NCIS - Sydney (2023)",
+	})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	if !prep.Executable {
+		t.Fatal("permission warnings alone must not mark the plan non-executable")
+	}
+	if prep.PermissionWarnings == nil || prep.PermissionWarnings.FolderIssues != 26 || prep.PermissionWarnings.FileIssues != 38 {
+		t.Fatalf("permission warnings = %#v", prep.PermissionWarnings)
+	}
+	if len(prep.Issues) > 0 {
+		t.Fatalf("blocking issues must be empty, got %#v", prep.Issues)
+	}
+}
+
+func TestPrepareBlockedWithStructuralPlanFailure(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStubWithEmptyTargetBin("data/media/tv/A", "disk1", 100)()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	if prep.Executable {
+		t.Fatal("empty target bin must remain non-executable")
+	}
+	if len(prep.Issues) == 0 || !strings.Contains(prep.Issues[0], "no executable items") {
+		t.Fatalf("structural blocking issues = %#v", prep.Issues)
+	}
+}
+
+func TestPrepareClearsPreviousVerification(t *testing.T) {
+	c := newCoreForRealTest()
+	c.autoGatherRealState = &domain.AutoGatherRealState{
+		Phase: domain.AutoGatherRealPhaseCompleted,
+		Verification: &domain.AutoGatherRealVerification{
+			Passed:  true,
+			Message: "Show data consolidated on target disk",
+		},
+		EndedAt: "2026-08-18T10:00:00Z",
+	}
+	defer installRealCanonicalStub("data/media/tv/NCIS - Sydney (2023)", "disk8", 100)()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{
+		ShowPath: "data/media/tv/NCIS - Sydney (2023)",
+	})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	state := c.GetAutoGatherRealState()
+	if state.Phase != domain.AutoGatherRealPhasePrepared {
+		t.Fatalf("phase = %q, want prepared", state.Phase)
+	}
+	if state.Verification != nil {
+		t.Fatalf("new PREPARE must clear previous verification, got %#v", state.Verification)
+	}
+	if state.EndedAt != "" {
+		t.Fatalf("new PREPARE must clear previous endedAt, got %q", state.EndedAt)
+	}
+}
+
+func TestExecuteProceedsDespitePermissionWarnings(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStubWithPermissionWarnings(
+		"data/media/tv/NCIS - Sydney (2023)", "disk8", 100, 0, 0, 26, 38,
+	)()
+	var execCount int32
+	prevExec := autoGatherRealExecuteHook
+	autoGatherRealExecuteHook = func(c *Core, plan *domain.Plan, targetPath string) gatherExecResult {
+		atomic.AddInt32(&execCount, 1)
+		if plan.FolderIssue != 26 || plan.FileIssue != 38 {
+			t.Fatalf("execute must receive permission-warning plan unchanged, got folder=%d file=%d", plan.FolderIssue, plan.FileIssue)
+		}
+		return gatherExecResult{outcome: gatherExecSuccess}
+	}
+	defer func() { autoGatherRealExecuteHook = prevExec }()
+	prevVerify := autoGatherRealVerifyHook
+	autoGatherRealVerifyHook = func(c *Core, showPath, targetDisk string) domain.AutoGatherRealVerification {
+		return domain.AutoGatherRealVerification{Passed: true}
+	}
+	defer func() { autoGatherRealVerifyHook = prevVerify }()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{
+		ShowPath: "data/media/tv/NCIS - Sydney (2023)",
+	})
+	if prep.Error != "" || !prep.Executable {
+		t.Fatalf("prepare: error=%q executable=%v", prep.Error, prep.Executable)
+	}
+	_, err := c.ExecuteAutoGatherReal(domain.AutoGatherRealExecuteRequest{
+		PreparationID: prep.PreparationID,
+		ShowPath:      "data/media/tv/NCIS - Sydney (2023)",
+		Confirm:       true,
+	})
+	if err != nil {
+		t.Fatalf("execute with permission warnings only must proceed: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if atomic.LoadInt32(&execCount) != 1 {
+		t.Fatalf("expected execute hook to run once, execCount=%d", execCount)
+	}
+}
+
+func TestPrepareOwnerGroupWarningsDoNotBlockExecution(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStubWithPermissionWarnings(
+		"data/media/tv/A", "disk1", 100, 2, 1, 0, 0,
+	)()
+
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+	if !prep.Executable {
+		t.Fatal("owner/group warnings alone must not block execution")
+	}
+	if prep.PermissionWarnings == nil || prep.PermissionWarnings.OwnerIssues != 2 || prep.PermissionWarnings.GroupIssues != 1 {
+		t.Fatalf("permission warnings = %#v", prep.PermissionWarnings)
+	}
+}

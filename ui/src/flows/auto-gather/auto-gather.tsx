@@ -20,6 +20,7 @@ import { humanBytes } from '~/helpers/units';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
   autoGatherRealNonExecutableExplanation,
+  autoGatherRealPermissionWarningMessage,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
   isAutoGatherRealExpiredPhase,
@@ -719,6 +720,8 @@ export const AutoGather: React.FunctionComponent = () => {
   const cancelEnabled = canCancelAutoGatherRealPrepare(realState);
   const nonExecutableExplanation =
     autoGatherRealNonExecutableExplanation(preparedMove);
+  const permissionWarningMessage =
+    autoGatherRealPermissionWarningMessage(preparedMove?.permissionWarnings);
 
   React.useEffect(() => {
     syncAutoGatherDryRun(dryRunActive);
@@ -840,6 +843,11 @@ export const AutoGather: React.FunctionComponent = () => {
                 Projected target free:{' '}
                 {humanBytes(preparedMove.projectedTargetFreeBytes || 0)}
               </div>
+              {permissionWarningMessage && (
+                <div className="font-medium text-amber-800 dark:text-amber-200">
+                  {permissionWarningMessage}
+                </div>
+              )}
               {nonExecutableExplanation && (
                 <div className="font-medium text-red-800 dark:text-red-200">
                   {nonExecutableExplanation}
@@ -916,7 +924,7 @@ export const AutoGather: React.FunctionComponent = () => {
               <div>{realState.stoppedMessage}</div>
             )}
             {realState?.error && <div>{realState.error}</div>}
-            {realState?.verification && (
+            {realState?.verification && realPhase !== 'prepared' && (
               <div>
                 Verification: {realState.verification.message}
                 {(realState.verification.substantiveDisks?.length || 0) > 0 && (
