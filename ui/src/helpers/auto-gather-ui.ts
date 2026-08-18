@@ -1,4 +1,4 @@
-import { Op } from '~/types';
+import { Op, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 
 export function isAutoGatherDryRunActivePhase(phase?: string | null): boolean {
@@ -18,12 +18,17 @@ export function isAutoGatherRealExecutionPhase(phase?: string | null): boolean {
   return phase === 'executing' || phase === 'stopping';
 }
 
+export function isAutoGatherRealExpiredPhase(phase?: string | null): boolean {
+  return phase === 'expired';
+}
+
 export function isAutoGatherRealTerminalPhase(phase?: string | null): boolean {
   return (
     phase === 'stopped' ||
     phase === 'completed' ||
     phase === 'failed' ||
     phase === 'verification_warning' ||
+    phase === 'expired' ||
     phase === 'idle' ||
     !phase
   );
@@ -49,6 +54,69 @@ export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
   );
 }
 
+export function isAutoGatherRealPrepareExpired(
+  expiresAt?: string | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!expiresAt) {
+    return false;
+  }
+  const parsed = Date.parse(expiresAt);
+  if (Number.isNaN(parsed)) {
+    return true;
+  }
+  return nowMs > parsed;
+}
+
+export function shouldShowAutoGatherRealConfirmPanel(
+  state?: AutoGatherRealState | null,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!state || state.phase !== 'prepared') {
+    return false;
+  }
+  if (!state.prepared?.preparationId) {
+    return false;
+  }
+  if (isAutoGatherRealPrepareExpired(state.prepared.expiresAt, nowMs)) {
+    return false;
+  }
+  return true;
+}
+
+export function canConfirmAutoGatherRealMove(opts: {
+  globalDryRun: boolean;
+  busy?: boolean;
+  executionActive?: boolean;
+  prepared?: AutoGatherRealPrepareResult | null;
+  nowMs?: number;
+}): boolean {
+  if (opts.globalDryRun || opts.busy || opts.executionActive) {
+    return false;
+  }
+  if (!opts.prepared?.preparationId || !opts.prepared.executable) {
+    return false;
+  }
+  if (isAutoGatherRealPrepareExpired(opts.prepared.expiresAt, opts.nowMs)) {
+    return false;
+  }
+  return true;
+}
+
+export function canCancelAutoGatherRealPrepare(
+  state?: AutoGatherRealState | null,
+  nowMs: number = Date.now(),
+): boolean {
+  return (
+    shouldShowAutoGatherRealConfirmPanel(state, nowMs) ||
+    isAutoGatherRealExpiredPhase(state?.phase)
+  );
+}
+
+export function shouldPollAutoGatherRealStatus(phase?: string | null): boolean {
+  return isAutoGatherRealExecutionPhase(phase) || phase === 'prepared';
+}
+
 export function shouldKeepAutoGatherPageVisible(
   status: Op,
   dryRunPhase?: string | null,
@@ -58,7 +126,8 @@ export function shouldKeepAutoGatherPageVisible(
     status === Op.AutoGatherDryRun ||
     status === Op.AutoGatherReal ||
     isAutoGatherDryRunActivePhase(dryRunPhase) ||
-    isAutoGatherRealActivePhase(realPhase)
+    isAutoGatherRealActivePhase(realPhase) ||
+    isAutoGatherRealExpiredPhase(realPhase)
   );
 }
 

@@ -15,11 +15,16 @@ import {
   useAutoGatherResult,
   useAutoGatherScanning,
 } from '~/state/auto-gather';
-import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherShow } from '~/types';
+import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
 import {
+  canCancelAutoGatherRealPrepare,
+  canConfirmAutoGatherRealMove,
+  isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
+  shouldPollAutoGatherRealStatus,
+  shouldShowAutoGatherRealConfirmPanel,
 } from '~/helpers/auto-gather-ui';
 import { Icon } from '~/shared/icons/icon';
 import { Api } from '~/api';
@@ -466,16 +471,11 @@ export const AutoGather: React.FunctionComponent = () => {
   const [realState, setRealState] = React.useState<AutoGatherRealState | null>(null);
   const [realBusy, setRealBusy] = React.useState(false);
   const [preparingShowPath, setPreparingShowPath] = React.useState('');
-  const [confirmOpen, setConfirmOpen] = React.useState(false);
-  const [preparedMove, setPreparedMove] = React.useState<AutoGatherRealPrepareResult | null>(null);
 
   const refreshRealStatus = React.useCallback(async () => {
     try {
       const status = await Api.getAutoGatherRealStatus();
       setRealState(status);
-      if (status.prepared) {
-        setPreparedMove(status.prepared);
-      }
     } catch {
       // ignore transient poll errors
     }
@@ -508,7 +508,7 @@ export const AutoGather: React.FunctionComponent = () => {
 
   React.useEffect(() => {
     const phase = realState?.phase;
-    if (!isAutoGatherRealExecutionPhase(phase)) {
+    if (!shouldPollAutoGatherRealStatus(phase)) {
       return;
     }
     const id = window.setInterval(() => {
@@ -570,8 +570,15 @@ export const AutoGather: React.FunctionComponent = () => {
         toast({ title: prep.error, variant: 'destructive' });
         return;
       }
-      setPreparedMove(prep);
-      setConfirmOpen(true);
+      setRealState({
+        phase: 'prepared',
+        globalDryRun: prep.globalDryRun,
+        currentShow: prep.showPath,
+        currentShowName: prep.showName,
+        currentTarget: prep.canonicalTargetDisk,
+        preparationId: prep.preparationId,
+        prepared: prep,
+      });
       await refreshRealStatus();
     } catch (e) {
       toast({
@@ -585,18 +592,17 @@ export const AutoGather: React.FunctionComponent = () => {
   };
 
   const onConfirmRealExecute = async () => {
-    if (!preparedMove?.preparationId) {
+    if (!realState?.prepared?.preparationId) {
       return;
     }
     setRealBusy(true);
     try {
       const state = await Api.executeAutoGatherReal({
-        preparationId: preparedMove.preparationId,
-        showPath: preparedMove.showPath,
+        preparationId: realState.prepared.preparationId,
+        showPath: realState.prepared.showPath,
         confirm: true,
       });
       setRealState(state);
-      setConfirmOpen(false);
       syncAutoGatherReal(true);
       toast({
         title: 'Real Gather started',
@@ -605,6 +611,23 @@ export const AutoGather: React.FunctionComponent = () => {
     } catch (e) {
       toast({
         title: e instanceof Error ? e.message : 'Unable to execute real move',
+        variant: 'destructive',
+      });
+      await refreshRealStatus();
+    } finally {
+      setRealBusy(false);
+    }
+  };
+
+  const onCancelPrepared = async () => {
+    setRealBusy(true);
+    try {
+      const state = await Api.cancelAutoGatherRealPrepare();
+      setRealState(state);
+      toast({ title: 'Preparation cancelled' });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to cancel preparation',
         variant: 'destructive',
       });
       await refreshRealStatus();
@@ -683,6 +706,15 @@ export const AutoGather: React.FunctionComponent = () => {
   const realPhase = realState?.phase ?? 'idle';
   const realExecutionActive = isAutoGatherRealExecutionPhase(realPhase);
   const stopEnabled = isAutoGatherStopEnabled(dryRunPhase, realPhase);
+  const showConfirmPanel = shouldShowAutoGatherRealConfirmPanel(realState);
+  const preparedMove = showConfirmPanel ? realState?.prepared ?? null : null;
+  const confirmEnabled = canConfirmAutoGatherRealMove({
+    globalDryRun: globalDryRun || !!realState?.globalDryRun,
+    busy: realBusy,
+    executionActive: realExecutionActive,
+    prepared: preparedMove,
+  });
+  const cancelEnabled = canCancelAutoGatherRealPrepare(realState);
 
   React.useEffect(() => {
     syncAutoGatherDryRun(dryRunActive);
@@ -788,7 +820,7 @@ export const AutoGather: React.FunctionComponent = () => {
               it off in Settings.
             </p>
           )}
-          {preparedMove && confirmOpen && (
+          {preparedMove && showConfirmPanel && (
             <div className="mt-3 rounded border border-red-300 dark:border-red-700 bg-white/70 dark:bg-gray-950/50 p-3 space-y-2 text-sm">
               <div className="font-semibold text-red-900 dark:text-red-100">
                 Confirm real move (not a dry run)
@@ -819,18 +851,36 @@ export const AutoGather: React.FunctionComponent = () => {
               <div className="flex flex-wrap gap-2 pt-2">
                 <Button
                   variant="destructive"
-                  disabled={globalDryRun || realBusy || realExecutionActive || !preparedMove.executable}
+                  disabled={!confirmEnabled}
                   onClick={() => void onConfirmRealExecute()}
                 >
                   Confirm real Gather
                 </Button>
                 <Button
                   variant="outline"
-                  onClick={() => setConfirmOpen(false)}
+                  disabled={realExecutionActive}
+                  onClick={() => void onCancelPrepared()}
                 >
                   Cancel
                 </Button>
               </div>
+            </div>
+          )}
+          {isAutoGatherRealExpiredPhase(realPhase) && (
+            <div className="mt-3 rounded border border-red-300 dark:border-red-700 bg-white/70 dark:bg-gray-950/50 p-3 space-y-2 text-sm">
+              <div className="font-semibold text-red-900 dark:text-red-100">
+                Preparation expired
+              </div>
+              <div>
+                {realState?.error || 'preparation expired; prepare again'}
+              </div>
+              <Button
+                variant="outline"
+                disabled={!cancelEnabled || realExecutionActive}
+                onClick={() => void onCancelPrepared()}
+              >
+                Cancel
+              </Button>
             </div>
           )}
           <div className="flex flex-wrap gap-2 mt-3">

@@ -14,9 +14,11 @@ import (
 )
 
 const (
-	autoGatherRealPrepareTTL = 5 * time.Minute
-	autoGatherRealMessage    = "Stage 3C performs at most one explicitly confirmed real Gather move."
-	autoGatherRealStoppedMsg = "The move was stopped. The interrupted transfer's source was not deleted. " +
+	autoGatherRealPrepareTTL   = 5 * time.Minute
+	autoGatherRealMessage      = "Stage 3C performs at most one explicitly confirmed real Gather move."
+	autoGatherRealExpiredMsg   = "preparation expired; prepare again"
+	autoGatherRealCancelledMsg = "preparation cancelled; prepare again to execute a real move"
+	autoGatherRealStoppedMsg   = "The move was stopped. The interrupted transfer's source was not deleted. " +
 		"Files transferred successfully before the stop may already have had their original source copies " +
 		"removed by normal Gather behaviour. The destination may also contain a partial copy of the interrupted transfer."
 )
@@ -205,14 +207,16 @@ func (c *Core) ExecuteAutoGatherReal(req domain.AutoGatherRealExecuteRequest) (d
 	c.autoGatherMu.Lock()
 	prepared := c.autoGatherRealPrepared
 	if prepared == nil || prepared.PreparationID != req.PreparationID {
+		c.expireAutoGatherRealPreparedIfNeededLocked()
+		state = c.snapshotAutoGatherRealLocked()
 		c.autoGatherMu.Unlock()
 		state.Error = "invalid or missing preparation token"
 		return state, fmt.Errorf("%s", state.Error)
 	}
-	if time.Now().UTC().After(parseAutoGatherTime(prepared.ExpiresAt)) {
-		c.clearAutoGatherRealPreparedLocked()
+	if autoGatherRealPreparationExpired(prepared) {
+		c.markAutoGatherRealPreparedExpiredLocked()
+		state = c.snapshotAutoGatherRealLocked()
 		c.autoGatherMu.Unlock()
-		state.Error = "preparation token expired; prepare again"
 		return state, fmt.Errorf("%s", state.Error)
 	}
 	showPath, err := validateAutoGatherCanonicalSelection([]string{strings.TrimSpace(req.ShowPath)})
@@ -276,9 +280,31 @@ func (c *Core) StopAutoGatherReal() domain.AutoGatherRealState {
 	return c.snapshotAutoGatherRealLocked()
 }
 
+func (c *Core) CancelAutoGatherRealPrepare() domain.AutoGatherRealState {
+	c.autoGatherMu.Lock()
+	defer c.autoGatherMu.Unlock()
+	c.expireAutoGatherRealPreparedIfNeededLocked()
+	c.ensureAutoGatherRealStateLocked()
+	switch c.autoGatherRealState.Phase {
+	case domain.AutoGatherRealPhasePreparing,
+		domain.AutoGatherRealPhaseExecuting,
+		domain.AutoGatherRealPhaseStopping:
+		snap := c.snapshotAutoGatherRealLocked()
+		snap.Error = "cannot cancel: real move is in progress; use Stop"
+		return snap
+	}
+	if c.autoGatherRealPrepared != nil ||
+		c.autoGatherRealState.Phase == domain.AutoGatherRealPhasePrepared ||
+		c.autoGatherRealState.Phase == domain.AutoGatherRealPhaseExpired {
+		c.markAutoGatherRealPreparedCancelledLocked()
+	}
+	return c.snapshotAutoGatherRealLocked()
+}
+
 func (c *Core) GetAutoGatherRealState() domain.AutoGatherRealState {
-	c.autoGatherMu.RLock()
-	defer c.autoGatherMu.RUnlock()
+	c.autoGatherMu.Lock()
+	defer c.autoGatherMu.Unlock()
+	c.expireAutoGatherRealPreparedIfNeededLocked()
 	return c.snapshotAutoGatherRealLocked()
 }
 
@@ -811,6 +837,59 @@ func parseAutoGatherTime(value string) time.Time {
 		return time.Time{}
 	}
 	return t
+}
+
+func autoGatherRealPreparationExpired(prepared *domain.AutoGatherRealPreparedMove) bool {
+	if prepared == nil {
+		return true
+	}
+	exp := parseAutoGatherTime(prepared.ExpiresAt)
+	return exp.IsZero() || time.Now().UTC().After(exp)
+}
+
+func (c *Core) expireAutoGatherRealPreparedIfNeededLocked() {
+	if c.autoGatherRealState != nil {
+		switch c.autoGatherRealState.Phase {
+		case domain.AutoGatherRealPhasePreparing,
+			domain.AutoGatherRealPhaseExecuting,
+			domain.AutoGatherRealPhaseStopping:
+			return
+		}
+	}
+	expired := false
+	if c.autoGatherRealPrepared != nil {
+		expired = autoGatherRealPreparationExpired(c.autoGatherRealPrepared)
+	} else if c.autoGatherRealState != nil && c.autoGatherRealState.Phase == domain.AutoGatherRealPhasePrepared {
+		expired = true
+	}
+	if !expired {
+		return
+	}
+	c.markAutoGatherRealPreparedExpiredLocked()
+}
+
+func (c *Core) markAutoGatherRealPreparedExpiredLocked() {
+	c.clearAutoGatherRealPreparedSessionLocked(domain.AutoGatherRealPhaseExpired, autoGatherRealExpiredMsg)
+	autoGatherRealLog("preparation expired")
+}
+
+func (c *Core) markAutoGatherRealPreparedCancelledLocked() {
+	c.clearAutoGatherRealPreparedSessionLocked(domain.AutoGatherRealPhaseIdle, autoGatherRealCancelledMsg)
+	autoGatherRealLog("preparation cancelled")
+}
+
+func (c *Core) clearAutoGatherRealPreparedSessionLocked(phase, message string) {
+	c.clearAutoGatherRealPreparedLocked()
+	c.ensureAutoGatherRealStateLocked()
+	c.autoGatherRealState.Phase = phase
+	c.autoGatherRealState.OperationPhase = ""
+	c.autoGatherRealState.PreparationID = ""
+	c.autoGatherRealState.Prepared = nil
+	c.autoGatherRealState.CurrentShow = ""
+	c.autoGatherRealState.CurrentShowName = ""
+	c.autoGatherRealState.CurrentTarget = ""
+	c.autoGatherRealState.Error = message
+	c.autoGatherRealState.Message = autoGatherRealMessage
 }
 
 func uniqueStrings(in []string) []string {

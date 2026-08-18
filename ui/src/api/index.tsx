@@ -245,6 +245,18 @@ export class Api {
     return body;
   }
 
+  static async cancelAutoGatherRealPrepare(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
   static async stopAutoGatherReal(): Promise<AutoGatherRealState> {
     const response = await fetch(`${Api.host}/auto-gather/real/stop`, {
       method: 'POST',

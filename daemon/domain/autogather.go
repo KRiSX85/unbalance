@@ -181,6 +181,7 @@ const (
 	AutoGatherRealPhaseIdle                = "idle"
 	AutoGatherRealPhasePreparing           = "preparing"
 	AutoGatherRealPhasePrepared            = "prepared"
+	AutoGatherRealPhaseExpired             = "expired"
 	AutoGatherRealPhaseExecuting           = "executing"
 	AutoGatherRealPhaseStopping            = "stopping"
 	AutoGatherRealPhaseStopped             = "stopped"

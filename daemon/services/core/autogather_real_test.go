@@ -185,6 +185,16 @@ func TestStage3CExecuteRefusesExpiredPreparation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "expired") {
 		t.Fatalf("expected expired token refusal, err=%v", err)
 	}
+	state := c.GetAutoGatherRealState()
+	if state.Phase != domain.AutoGatherRealPhaseExpired {
+		t.Fatalf("phase after expired execute = %q, want expired", state.Phase)
+	}
+	if state.Prepared != nil || state.PreparationID != "" {
+		t.Fatal("expired execute must invalidate the prepared object")
+	}
+	if c.autoGatherRealPrepared != nil {
+		t.Fatal("expired execute must clear the in-memory preparation token")
+	}
 }
 
 func TestStage3CExecuteRefusesTargetChange(t *testing.T) {
@@ -916,5 +926,127 @@ func TestAutoGatherRealPlanChangedPerformsNoOperation(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if c.state.Operation != nil {
 		t.Fatal("plan change must not create a gather operation")
+	}
+}
+
+func TestGetAutoGatherRealStateExpiresStalePrepared(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStub("data/media/tv/A", "disk1", 100)()
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+
+	fresh := c.GetAutoGatherRealState()
+	if fresh.Phase != domain.AutoGatherRealPhasePrepared || fresh.Prepared == nil {
+		t.Fatalf("valid prepared status must survive GET, phase=%q prepared=%v", fresh.Phase, fresh.Prepared != nil)
+	}
+	if fresh.Prepared.PreparationID != prep.PreparationID {
+		t.Fatal("GET must return the same preparation token while valid")
+	}
+
+	c.autoGatherMu.Lock()
+	c.autoGatherRealPrepared.ExpiresAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	c.autoGatherMu.Unlock()
+
+	expired := c.GetAutoGatherRealState()
+	if expired.Phase != domain.AutoGatherRealPhaseExpired {
+		t.Fatalf("GET after expiry phase = %q, want expired", expired.Phase)
+	}
+	if expired.Prepared != nil || expired.PreparationID != "" {
+		t.Fatal("expired GET must not keep a usable prepared object")
+	}
+	if !strings.Contains(expired.Error, "expired") {
+		t.Fatalf("expired GET must explain expiry, got %q", expired.Error)
+	}
+	if c.isAutoGatherRealSessionActive() {
+		t.Fatal("expired phase must not remain a live Stage 3C session")
+	}
+	if c.isAutoGatherRealExecutionBusy() {
+		t.Fatal("expired phase must not be execution-busy")
+	}
+	prevExec := autoGatherRealExecuteHook
+	autoGatherRealExecuteHook = func(c *Core, plan *domain.Plan, targetPath string) gatherExecResult {
+		t.Fatal("expired preparation must not execute")
+		return gatherExecResult{}
+	}
+	defer func() { autoGatherRealExecuteHook = prevExec }()
+	if _, err := c.ExecuteAutoGatherReal(domain.AutoGatherRealExecuteRequest{
+		PreparationID: prep.PreparationID, ShowPath: "data/media/tv/A", Confirm: true,
+	}); err == nil {
+		t.Fatal("execute after status expiry must refuse")
+	}
+}
+
+func TestCancelAutoGatherRealPrepareClearsValidAndExpiredState(t *testing.T) {
+	c := newCoreForRealTest()
+	defer installRealCanonicalStub("data/media/tv/A", "disk1", 100)()
+	prep := c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	if prep.Error != "" {
+		t.Fatalf("prepare: %s", prep.Error)
+	}
+
+	cancelled := c.CancelAutoGatherRealPrepare()
+	if cancelled.Phase != domain.AutoGatherRealPhaseIdle {
+		t.Fatalf("cancel phase = %q, want idle", cancelled.Phase)
+	}
+	if cancelled.Prepared != nil || c.autoGatherRealPrepared != nil {
+		t.Fatal("cancel must clear the preparation token and snapshot")
+	}
+	if !strings.Contains(cancelled.Error, "cancelled") {
+		t.Fatalf("cancel message = %q", cancelled.Error)
+	}
+
+	c.PrepareAutoGatherReal(domain.AutoGatherRealPrepareRequest{ShowPath: "data/media/tv/A"})
+	c.autoGatherMu.Lock()
+	c.autoGatherRealPrepared.ExpiresAt = time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)
+	c.autoGatherMu.Unlock()
+	afterExpiry := c.CancelAutoGatherRealPrepare()
+	if afterExpiry.Phase != domain.AutoGatherRealPhaseIdle {
+		t.Fatalf("cancel after expiry phase = %q, want idle", afterExpiry.Phase)
+	}
+	if afterExpiry.Prepared != nil {
+		t.Fatal("cancel after expiry must not leave a prepared object")
+	}
+}
+
+func TestCancelAutoGatherRealPrepareDoesNotStopExecuting(t *testing.T) {
+	c := newCoreForRealTest()
+	c.autoGatherRealState = &domain.AutoGatherRealState{Phase: domain.AutoGatherRealPhaseExecuting}
+	c.autoGatherRealStopRequested = false
+	got := c.CancelAutoGatherRealPrepare()
+	if got.Phase != domain.AutoGatherRealPhaseExecuting {
+		t.Fatalf("cancel during execute phase = %q, want executing", got.Phase)
+	}
+	if !strings.Contains(got.Error, "use Stop") {
+		t.Fatalf("cancel during execute must refuse, got %q", got.Error)
+	}
+	if c.autoGatherRealStopRequested {
+		t.Fatal("cancel must not request Stop")
+	}
+	live := c.GetAutoGatherRealState()
+	if live.Phase != domain.AutoGatherRealPhaseExecuting {
+		t.Fatalf("live phase after cancel attempt = %q", live.Phase)
+	}
+	if live.Error != "" {
+		t.Fatalf("cancel refusal must not persist onto live executing state, got %q", live.Error)
+	}
+}
+
+func TestExpiredPreparedDoesNotRemainSessionActiveAfterStatusRead(t *testing.T) {
+	c := newCoreForRealTest()
+	c.ctx.DryRun = true
+	c.autoGatherRealState = &domain.AutoGatherRealState{
+		Phase:         domain.AutoGatherRealPhasePrepared,
+		PreparationID: "stale",
+		Prepared:      &domain.AutoGatherRealPrepareResult{PreparationID: "stale", ExpiresAt: time.Now().UTC().Add(-time.Minute).Format(time.RFC3339)},
+	}
+	c.autoGatherRealPrepared = &domain.AutoGatherRealPreparedMove{
+		PreparationID: "stale",
+		ExpiresAt:     time.Now().UTC().Add(-time.Minute).Format(time.RFC3339),
+	}
+	_ = c.GetAutoGatherRealState()
+	if c.isAutoGatherRealSessionActive() {
+		t.Fatal("status read must inactivate an expired preparation")
 	}
 }

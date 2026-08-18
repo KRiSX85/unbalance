@@ -79,7 +79,9 @@ func (s *Server) Start() error {
 
 	s.engine.Use(middleware.Recover())
 	s.engine.Use(middleware.CORS())
-	s.engine.Use(middleware.Gzip())
+	s.engine.Use(middleware.GzipWithConfig(middleware.GzipConfig{
+		Skipper: skipGzipForWebsocket,
+	}))
 	// s.engine.Use(middleware.Logger())
 
 	// serves index.html and favicon related assets on the root path (coming from public folder, built into dist folder)
@@ -118,6 +120,7 @@ func (s *Server) Start() error {
 	protected.GET("/auto-gather/dry-run/status", s.autoGatherDryRunStatus)
 	protected.POST("/auto-gather/real/prepare", s.autoGatherRealPrepare, s.requireCSRF)
 	protected.POST("/auto-gather/real/execute", s.autoGatherRealExecute, s.requireCSRF)
+	protected.POST("/auto-gather/real/cancel", s.autoGatherRealCancel, s.requireCSRF)
 	protected.POST("/auto-gather/real/stop", s.autoGatherRealStop, s.requireCSRF)
 	protected.GET("/auto-gather/real/status", s.autoGatherRealStatus)
 	protected.GET("/logs", s.getLog)
@@ -156,6 +159,28 @@ func assetsHandler(content embed.FS) http.Handler {
 	return http.FileServer(http.FS(fsys))
 }
 
+func skipGzipForWebsocket(c echo.Context) bool {
+	if c.Request() == nil {
+		return false
+	}
+	if strings.EqualFold(c.Request().Header.Get("Upgrade"), "websocket") {
+		return true
+	}
+	path := c.Request().URL.Path
+	return path == "/ws" || strings.HasSuffix(path, "/ws")
+}
+
+func websocketReadIsBenignClose(err error) bool {
+	if err == nil {
+		return true
+	}
+	return websocket.IsCloseError(err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseNoStatusReceived,
+	)
+}
+
 func (s *Server) wsHandler(c echo.Context) error {
 	if err := s.validateWebsocketRequest(c); err != nil {
 		return err
@@ -182,7 +207,14 @@ func (s *Server) wsHandler(c echo.Context) error {
 	s.wsSession = sessionID
 	s.wsMu.Unlock()
 
-	return s.wsRead(conn, sessionID)
+	err = s.wsRead(conn, sessionID)
+	if err != nil && !websocketReadIsBenignClose(err) {
+		logger.Red("unable to read websocket message: %s", err)
+	}
+	// Upgrade hijacks the HTTP connection. Returning an error here would
+	// make Echo write an HTTP status/body onto that hijacked connection
+	// (WriteHeader/Write after a normal browser refresh close 1001).
+	return nil
 }
 
 func (s *Server) wsRead(conn *websocket.Conn, sessionID string) (err error) {
@@ -190,7 +222,6 @@ func (s *Server) wsRead(conn *websocket.Conn, sessionID string) (err error) {
 		var packet domain.Packet
 		err = conn.ReadJSON(&packet)
 		if err != nil {
-			logger.Red("unable to read websocket message: %s", err)
 			return err
 		}
 
@@ -351,6 +382,10 @@ func (s *Server) autoGatherRealExecute(c echo.Context) error {
 
 func (s *Server) autoGatherRealStop(c echo.Context) error {
 	return c.JSON(200, s.core.StopAutoGatherReal())
+}
+
+func (s *Server) autoGatherRealCancel(c echo.Context) error {
+	return c.JSON(200, s.core.CancelAutoGatherRealPrepare())
 }
 
 func (s *Server) autoGatherRealStatus(c echo.Context) error {
