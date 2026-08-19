@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { Op } from '~/types';
+import { AutoGatherRealState, Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
@@ -13,6 +13,7 @@ import {
   isAutoGatherControlledInterruptedPhase,
   canAcknowledgeAutoGatherControlled,
   autoGatherControlledLiveRsyncBlocksAck,
+  shouldApplyControlledLibraryScan,
   shouldKeepAutoGatherPageForControlled,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
@@ -23,7 +24,7 @@ import {
   shouldReplacePageWithScatterGatherOperation,
   shouldShowAutoGatherRealConfirmPanel,
 } from '~/helpers/auto-gather-ui';
-import { AutoGatherRealState } from '~/types';
+import { bytesFromDecimalGB, formatByteBoundAsGB } from '~/helpers/units';
 
 describe('Auto Gather Stage 3B UI routing', () => {
   it('does not map an active Auto Gather run to the generic Scatter/Gather busy pages', () => {
@@ -435,5 +436,39 @@ describe('Auto Gather Stage 3D interrupted recovery', () => {
         rsyncProbe: { alive: true, plausibleRsync: false },
       }),
     ).toBe(true);
+  });
+});
+
+describe('Auto Gather Stage 3D Max GB display', () => {
+  it('keeps the entered Max GB value after Start', () => {
+    const maxBytes = bytesFromDecimalGB(10);
+    expect(maxBytes).toBe(10_000_000_000);
+    expect(formatByteBoundAsGB(maxBytes)).toBe('10 GB');
+  });
+});
+
+describe('Auto Gather Stage 3D library snapshot apply', () => {
+  it('applies a successful published library scan and ignores cancelled or error scans', () => {
+    expect(
+      shouldApplyControlledLibraryScan({
+        libraryPath: 'data/media/tv',
+        shows: [],
+      }),
+    ).toBe(true);
+    expect(
+      shouldApplyControlledLibraryScan({
+        libraryPath: 'data/media/tv',
+        shows: [],
+        cancelled: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldApplyControlledLibraryScan({
+        libraryPath: 'data/media/tv',
+        shows: [],
+        error: 'scan failed',
+      }),
+    ).toBe(false);
+    expect(shouldApplyControlledLibraryScan(undefined)).toBe(false);
   });
 });

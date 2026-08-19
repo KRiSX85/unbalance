@@ -74,6 +74,27 @@ export const humanBytes = (bytes: number) => {
   return `${value} ${unit}`;
 };
 
+// Decimal gigabyte used by the rest of unbalanced (formatBytes / humanBytes).
+export const DECIMAL_GIGABYTE = 1000 * 1000 * 1000;
+
+export const bytesFromDecimalGB = (gb: number) => {
+  if (!Number.isFinite(gb) || gb <= 0) {
+    return 0;
+  }
+  return Math.round(gb * DECIMAL_GIGABYTE);
+};
+
+export const formatByteBoundAsGB = (bytes: number) => {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return humanBytes(0);
+  }
+  const gb = bytes / DECIMAL_GIGABYTE;
+  if (Math.abs(gb - Math.round(gb)) < 1e-9) {
+    return `${Math.round(gb)} GB`;
+  }
+  return humanBytes(bytes);
+};
+
 export const formatTime = (time: number) => {
   const hours = Math.floor(time / 3600);
   const minutes = Math.floor((time - hours * 3600) / 60);

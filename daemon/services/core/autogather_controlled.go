@@ -266,6 +266,10 @@ func (c *Core) snapshotAutoGatherControlledLocked() domain.AutoGatherControlledS
 		snap.RsyncProbe = &probe
 		snap.CanAcknowledge = !controlledRsyncProbeBlocksAck(probe)
 	}
+	if snap.LibraryScan != nil {
+		cloned := cloneAutoGatherScanResult(*snap.LibraryScan)
+		snap.LibraryScan = &cloned
+	}
 	return snap
 }
 
@@ -356,6 +360,7 @@ func (c *Core) autoGatherControlledLoop(maxShows int, maxBytes uint64) {
 			c.finalizeAutoGatherControlled(domain.AutoGatherControlledPhaseStopped, "", "", "")
 			return
 		}
+		c.publishAutoGatherControlledLibraryScan(scored)
 
 		// Select next show (same selection logic as dry-run).
 		c.setAutoGatherControlledOperationPhase("select")
@@ -589,6 +594,7 @@ func (c *Core) recordAutoGatherControlledCompleted(show domain.AutoGatherShow, t
 	c.autoGatherControlledRun.CurrentShowName = ""
 	c.autoGatherControlledRun.CurrentTarget = ""
 	c.autoGatherControlledRun.OperationPhase = ""
+	markShowConsolidatedInLibraryScan(c.autoGatherControlledRun.LibraryScan, show.Path)
 }
 
 func (c *Core) recordAutoGatherControlledSkipped(show domain.AutoGatherShow, reason string) {
@@ -631,6 +637,38 @@ func (c *Core) finalizeAutoGatherControlled(phase, failedShow, failedName, reaso
 func (c *Core) failAutoGatherControlled(showPath, showName, reason string) {
 	autoGatherControlledLog("failed: %s: %s", showPath, reason)
 	c.finalizeAutoGatherControlled(domain.AutoGatherControlledPhaseFailed, showPath, showName, reason)
+}
+
+func (c *Core) publishAutoGatherControlledLibraryScan(scan domain.AutoGatherScanResult) {
+	if scan.Cancelled || scan.Error != "" {
+		return
+	}
+	c.autoGatherMu.Lock()
+	defer c.autoGatherMu.Unlock()
+	if c.autoGatherControlledRun == nil {
+		return
+	}
+	cloned := cloneAutoGatherScanResult(scan)
+	for _, rec := range c.autoGatherControlledRun.Completed {
+		markShowConsolidatedInLibraryScan(&cloned, rec.ShowPath)
+	}
+	c.autoGatherControlledRun.LibraryScan = &cloned
+}
+
+func markShowConsolidatedInLibraryScan(scan *domain.AutoGatherScanResult, showPath string) {
+	if scan == nil || showPath == "" {
+		return
+	}
+	for i := range scan.Shows {
+		if scan.Shows[i].Path != showPath {
+			continue
+		}
+		scan.Shows[i].Split = false
+		scan.Shows[i].Ready = false
+		scan.Shows[i].Status = domain.AutoGatherStatusConsolidated
+		clearAutoGatherDerivedRecommendationFields(&scan.Shows[i])
+		return
+	}
 }
 
 // --- Execution adapters (reuse Stage 3C real Gather path) ---

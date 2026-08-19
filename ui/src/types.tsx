@@ -246,6 +246,7 @@ export interface AutoGatherControlledState {
   rsyncProbe?: AutoGatherControlledRsyncProbe;
   requiresAcknowledgement?: boolean;
   canAcknowledge?: boolean;
+  libraryScan?: AutoGatherScanResult;
 }
 
 export interface AuthStatus {

@@ -60,10 +60,10 @@ func installControlledHooksDefault(showPath, target string, move uint64) func() 
 	targetPath := "/mnt/" + target
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
-			ShowPath:                   show.Path,
-			CanonicalRecommendedTarget: target,
+			ShowPath:                           show.Path,
+			CanonicalRecommendedTarget:         target,
 			Stage2TargetStillCanonicalEligible: true,
-			CanonicalMoveBytes:         move,
+			CanonicalMoveBytes:                 move,
 			CanonicalTargets: []domain.AutoGatherCanonicalTarget{
 				{DiskName: target, DiskPath: targetPath, IsPhysicalArrayDisk: true, CanonicalEligible: true, MeetsPreferredFreeFloor: true, CanonicalBytesToMove: move, FreeBytes: gib(50), ProjectedFreeBytes: gib(40)},
 			},
@@ -129,6 +129,13 @@ func TestControlledCompletesOneShow(t *testing.T) {
 	if len(final.Completed) != 1 || final.Completed[0].ShowPath != "data/media/tv/A" {
 		t.Fatalf("completed=%#v", final.Completed)
 	}
+	if final.LibraryScan == nil || len(final.LibraryScan.Shows) != 1 {
+		t.Fatalf("expected published library scan, got %#v", final.LibraryScan)
+	}
+	got := final.LibraryScan.Shows[0]
+	if got.Split || got.Status != domain.AutoGatherStatusConsolidated || got.RecommendedTargetDisk != "" {
+		t.Fatalf("completed show should be consolidated in published scan: %+v", got)
+	}
 	if controlledMarkerExists(c) {
 		t.Fatal("completed session must remove the marker")
 	}
@@ -167,7 +174,9 @@ func TestControlledMaxShowsEnforced(t *testing.T) {
 		}
 		return domain.AutoGatherScanResult{LibraryPath: "data/media/tv", Shows: shows}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",
@@ -198,6 +207,32 @@ func TestControlledMaxShowsEnforced(t *testing.T) {
 	}
 	if len(final.Completed) != 2 {
 		t.Fatalf("expected 2 completed, got %d", len(final.Completed))
+	}
+	if final.LibraryScan == nil {
+		t.Fatal("expected published library scan after real moves")
+	}
+	completed := map[string]struct{}{}
+	for _, rec := range final.Completed {
+		completed[rec.ShowPath] = struct{}{}
+	}
+	split := 0
+	recs := 0
+	for _, show := range final.LibraryScan.Shows {
+		if _, ok := completed[show.Path]; ok {
+			if show.Split || show.Status != domain.AutoGatherStatusConsolidated || show.RecommendedTargetDisk != "" {
+				t.Fatalf("completed show %s still looks split in published scan: %+v", show.Path, show)
+			}
+			continue
+		}
+		if show.Status == domain.AutoGatherStatusSplit {
+			split++
+			if show.RecommendedTargetDisk != "" {
+				recs++
+			}
+		}
+	}
+	if split != 8 || recs != 8 {
+		t.Fatalf("published scan split=%d recs=%d, want 8/8 after two completed moves", split, recs)
 	}
 }
 
@@ -247,7 +282,9 @@ func TestControlledMaxBytesCumulativeNeverExceeded(t *testing.T) {
 			},
 		}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",
@@ -345,7 +382,9 @@ func TestControlledStopBetweenShows(t *testing.T) {
 			},
 		}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",
@@ -398,7 +437,9 @@ func TestControlledStopDuringExecution(t *testing.T) {
 			Shows:       []domain.AutoGatherShow{{Name: "A", Path: "data/media/tv/A", Status: domain.AutoGatherStatusSplit, Split: true, Ready: true, RecommendedTargetDisk: "disk1", MoveRequiredBytes: 100, TotalVideoBytes: 100, TotalBytes: 100}},
 		}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",
@@ -727,7 +768,9 @@ func TestControlledFreshScanBetweenMoves(t *testing.T) {
 			},
 		}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",
@@ -794,7 +837,9 @@ func TestControlledNoBatchParallelExecution(t *testing.T) {
 			},
 		}
 	}
-	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult { return base }
+	autoGatherControlledRescoreHook = func(c *Core, base domain.AutoGatherScanResult, unraid *domain.Unraid) domain.AutoGatherScanResult {
+		return base
+	}
 	autoGatherControlledCanonicalHook = func(c *Core, show domain.AutoGatherShow) domain.AutoGatherCanonicalPlanResult {
 		return domain.AutoGatherCanonicalPlanResult{
 			ShowPath: show.Path, CanonicalRecommendedTarget: "disk1",

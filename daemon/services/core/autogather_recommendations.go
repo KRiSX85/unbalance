@@ -258,10 +258,10 @@ func clearAutoGatherDerivedRecommendationFields(show *domain.AutoGatherShow) {
 	show.NoEligibleReason = ""
 }
 
-// cloneAutoGatherDiscoverySnapshot copies Stage 1 discovery data and clears any
-// Stage 2 recommendation fields. Used by Stage 3B to retain one library scan
-// for the run lifetime while re-scoring from fresh disk state each iteration.
-func cloneAutoGatherDiscoverySnapshot(src domain.AutoGatherScanResult) domain.AutoGatherScanResult {
+// cloneAutoGatherScanResult copies a library scan including Stage 2
+// recommendation fields. Used to publish an already-computed snapshot without
+// sharing backing slices with the orchestration loop.
+func cloneAutoGatherScanResult(src domain.AutoGatherScanResult) domain.AutoGatherScanResult {
 	out := domain.AutoGatherScanResult{
 		LibraryPath: src.LibraryPath,
 		Shows:       make([]domain.AutoGatherShow, len(src.Shows)),
@@ -270,15 +270,34 @@ func cloneAutoGatherDiscoverySnapshot(src domain.AutoGatherScanResult) domain.Au
 		Cancelled:   src.Cancelled,
 	}
 	for i := range src.Shows {
-		show := src.Shows[i]
-		show.VideoDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].VideoDisks...)
-		show.SidecarOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].SidecarOnlyDisks...)
-		show.EmptyOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.Shows[i].EmptyOnlyDisks...)
-		show.CachePoolsWithVideo = append([]string(nil), src.Shows[i].CachePoolsWithVideo...)
-		show.CleanupCandidateDisks = append([]string(nil), src.Shows[i].CleanupCandidateDisks...)
-		clearAutoGatherDerivedRecommendationFields(&show)
-		show.CleanupCandidateCount = len(show.CleanupCandidateDisks)
-		out.Shows[i] = show
+		out.Shows[i] = cloneAutoGatherShow(src.Shows[i])
+	}
+	return out
+}
+
+func cloneAutoGatherShow(src domain.AutoGatherShow) domain.AutoGatherShow {
+	show := src
+	show.VideoDisks = append([]domain.AutoGatherDiskPresence(nil), src.VideoDisks...)
+	show.SidecarOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.SidecarOnlyDisks...)
+	show.EmptyOnlyDisks = append([]domain.AutoGatherDiskPresence(nil), src.EmptyOnlyDisks...)
+	show.CachePoolsWithVideo = append([]string(nil), src.CachePoolsWithVideo...)
+	show.CleanupCandidateDisks = append([]string(nil), src.CleanupCandidateDisks...)
+	show.GatherTargets = append([]domain.AutoGatherTargetCandidate(nil), src.GatherTargets...)
+	if src.MinMovementAlternative != nil {
+		alt := *src.MinMovementAlternative
+		show.MinMovementAlternative = &alt
+	}
+	return show
+}
+
+// cloneAutoGatherDiscoverySnapshot copies Stage 1 discovery data and clears any
+// Stage 2 recommendation fields. Used by Stage 3B to retain one library scan
+// for the run lifetime while re-scoring from fresh disk state each iteration.
+func cloneAutoGatherDiscoverySnapshot(src domain.AutoGatherScanResult) domain.AutoGatherScanResult {
+	out := cloneAutoGatherScanResult(src)
+	for i := range out.Shows {
+		clearAutoGatherDerivedRecommendationFields(&out.Shows[i])
+		out.Shows[i].CleanupCandidateCount = len(out.Shows[i].CleanupCandidateDisks)
 	}
 	return out
 }

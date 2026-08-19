@@ -10,6 +10,7 @@ interface AutoGatherStore {
   error: string;
   actions: {
     scan: () => Promise<void>;
+    applyResult: (result: AutoGatherScanResult) => void;
     clear: () => void;
   };
 }
@@ -40,6 +41,15 @@ export const useAutoGatherStore = create<AutoGatherStore>()(
             state.scanning = false;
           });
         }
+      },
+      applyResult: (result) => {
+        set((state) => {
+          if (state.scanning) {
+            return;
+          }
+          state.result = result;
+          state.error = result.error || '';
+        });
       },
       clear: () => {
         set((state) => {

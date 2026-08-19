@@ -1,4 +1,4 @@
-import { Op, AutoGatherRealPermissionWarnings, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
+import { Op, AutoGatherRealPermissionWarnings, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherScanResult } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 
 export function isAutoGatherDryRunActivePhase(phase?: string | null): boolean {
@@ -237,6 +237,15 @@ export function shouldKeepAutoGatherPageForControlled(
     controlledPhase === 'completed' ||
     controlledPhase === 'interrupted'
   );
+}
+
+export function shouldApplyControlledLibraryScan(
+  scan?: AutoGatherScanResult | null,
+): boolean {
+  if (!scan || scan.cancelled || scan.error) {
+    return false;
+  }
+  return Array.isArray(scan.shows);
 }
 
 export function headerShowsBusy(status: Op): boolean {

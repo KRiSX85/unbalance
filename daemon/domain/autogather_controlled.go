@@ -6,12 +6,12 @@ package domain
 
 // Phase values for the controlled real Auto Gather session (Stage 3D).
 const (
-	AutoGatherControlledPhaseIdle       = "idle"
-	AutoGatherControlledPhaseRunning    = "running"
-	AutoGatherControlledPhaseStopping   = "stopping"
-	AutoGatherControlledPhaseStopped    = "stopped"
-	AutoGatherControlledPhaseFailed     = "failed"
-	AutoGatherControlledPhaseCompleted  = "completed"
+	AutoGatherControlledPhaseIdle        = "idle"
+	AutoGatherControlledPhaseRunning     = "running"
+	AutoGatherControlledPhaseStopping    = "stopping"
+	AutoGatherControlledPhaseStopped     = "stopped"
+	AutoGatherControlledPhaseFailed      = "failed"
+	AutoGatherControlledPhaseCompleted   = "completed"
 	AutoGatherControlledPhaseInterrupted = "interrupted"
 )
 
@@ -31,48 +31,52 @@ type AutoGatherControlledAcknowledgeRequest struct {
 // AutoGatherControlledRsyncProbe is a diagnostic snapshot of a recorded rsync
 // child PID after daemon restart. It is never used to kill a process.
 type AutoGatherControlledRsyncProbe struct {
-	PID             int    `json:"pid,omitempty"`
-	Alive           bool   `json:"alive"`
-	PlausibleRsync  bool   `json:"plausibleRsync"`
-	Command         string `json:"command,omitempty"`
-	Note            string `json:"note,omitempty"`
+	PID            int    `json:"pid,omitempty"`
+	Alive          bool   `json:"alive"`
+	PlausibleRsync bool   `json:"plausibleRsync"`
+	Command        string `json:"command,omitempty"`
+	Note           string `json:"note,omitempty"`
 }
 
 // AutoGatherControlledShowRecord records one show processed during a Stage 3D session.
 type AutoGatherControlledShowRecord struct {
-	ShowPath           string                        `json:"showPath"`
-	ShowName           string                        `json:"showName,omitempty"`
-	TargetDisk         string                        `json:"targetDisk,omitempty"`
-	MoveBytes          uint64                        `json:"moveBytes,omitempty"`
+	ShowPath           string                            `json:"showPath"`
+	ShowName           string                            `json:"showName,omitempty"`
+	TargetDisk         string                            `json:"targetDisk,omitempty"`
+	MoveBytes          uint64                            `json:"moveBytes,omitempty"`
 	PermissionWarnings *AutoGatherRealPermissionWarnings `json:"permissionWarnings,omitempty"`
-	Reason             string                        `json:"reason,omitempty"`
-	At                 string                        `json:"at,omitempty"`
+	Reason             string                            `json:"reason,omitempty"`
+	At                 string                            `json:"at,omitempty"`
 }
 
 // AutoGatherControlledState is the server-authoritative Stage 3D session status.
 type AutoGatherControlledState struct {
-	Phase              string                           `json:"phase"`
-	GlobalDryRun       bool                            `json:"globalDryRun"`
-	MaxShows           int                             `json:"maxShows"`
-	MaxBytes           uint64                          `json:"maxBytes"`
-	CurrentShow        string                          `json:"currentShow,omitempty"`
-	CurrentShowName    string                          `json:"currentShowName,omitempty"`
-	CurrentTarget      string                          `json:"currentTarget,omitempty"`
-	OperationPhase     string                          `json:"operationPhase,omitempty"`
-	Completed          []AutoGatherControlledShowRecord `json:"completed,omitempty"`
-	Skipped            []AutoGatherControlledShowRecord `json:"skipped,omitempty"`
-	CumulativeBytes    uint64                          `json:"cumulativeBytes"`
-	FailedShow         string                          `json:"failedShow,omitempty"`
-	FailedShowName     string                          `json:"failedShowName,omitempty"`
-	FailureReason      string                          `json:"failureReason,omitempty"`
-	StartedAt                string                          `json:"startedAt,omitempty"`
-	EndedAt                  string                          `json:"endedAt,omitempty"`
-	Message                  string                          `json:"message,omitempty"`
-	Error                    string                          `json:"error,omitempty"`
-	SessionID                string                          `json:"sessionId,omitempty"`
-	LastRsyncPID             int                             `json:"lastRsyncPid,omitempty"`
-	LastSourceEntry          string                          `json:"lastSourceEntry,omitempty"`
-	RsyncProbe               *AutoGatherControlledRsyncProbe `json:"rsyncProbe,omitempty"`
-	RequiresAcknowledgement  bool                            `json:"requiresAcknowledgement,omitempty"`
-	CanAcknowledge           bool                            `json:"canAcknowledge,omitempty"`
+	Phase                   string                           `json:"phase"`
+	GlobalDryRun            bool                             `json:"globalDryRun"`
+	MaxShows                int                              `json:"maxShows"`
+	MaxBytes                uint64                           `json:"maxBytes"`
+	CurrentShow             string                           `json:"currentShow,omitempty"`
+	CurrentShowName         string                           `json:"currentShowName,omitempty"`
+	CurrentTarget           string                           `json:"currentTarget,omitempty"`
+	OperationPhase          string                           `json:"operationPhase,omitempty"`
+	Completed               []AutoGatherControlledShowRecord `json:"completed,omitempty"`
+	Skipped                 []AutoGatherControlledShowRecord `json:"skipped,omitempty"`
+	CumulativeBytes         uint64                           `json:"cumulativeBytes"`
+	FailedShow              string                           `json:"failedShow,omitempty"`
+	FailedShowName          string                           `json:"failedShowName,omitempty"`
+	FailureReason           string                           `json:"failureReason,omitempty"`
+	StartedAt               string                           `json:"startedAt,omitempty"`
+	EndedAt                 string                           `json:"endedAt,omitempty"`
+	Message                 string                           `json:"message,omitempty"`
+	Error                   string                           `json:"error,omitempty"`
+	SessionID               string                           `json:"sessionId,omitempty"`
+	LastRsyncPID            int                              `json:"lastRsyncPid,omitempty"`
+	LastSourceEntry         string                           `json:"lastSourceEntry,omitempty"`
+	RsyncProbe              *AutoGatherControlledRsyncProbe  `json:"rsyncProbe,omitempty"`
+	RequiresAcknowledgement bool                             `json:"requiresAcknowledgement,omitempty"`
+	CanAcknowledge          bool                             `json:"canAcknowledge,omitempty"`
+	// LibraryScan is the latest Stage 1+2 library snapshot already produced
+	// by the controlled session. Presentation only; the browser must not
+	// treat it as orchestration state.
+	LibraryScan *AutoGatherScanResult `json:"libraryScan,omitempty"`
 }

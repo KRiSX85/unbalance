@@ -16,7 +16,7 @@ import {
   useAutoGatherScanning,
 } from '~/state/auto-gather';
 import { AutoGatherCanonicalPlanResult, AutoGatherControlledState, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
-import { humanBytes } from '~/helpers/units';
+import { bytesFromDecimalGB, formatByteBoundAsGB, humanBytes } from '~/helpers/units';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
   autoGatherRealNonExecutableExplanation,
@@ -29,6 +29,7 @@ import {
   isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
+  shouldApplyControlledLibraryScan,
   shouldPollAutoGatherRealStatus,
   shouldShowAutoGatherRealConfirmPanel,
 } from '~/helpers/auto-gather-ui';
@@ -463,7 +464,7 @@ export const AutoGather: React.FunctionComponent = () => {
   const tvLibraryPath = useConfigTvLibraryPath();
   const globalDryRun = useConfigDryRun();
   const { setTvLibraryPath } = useConfigActions();
-  const { scan } = useAutoGatherActions();
+  const { scan, applyResult } = useAutoGatherActions();
   const scanning = useAutoGatherScanning();
   const result = useAutoGatherResult();
   const error = useAutoGatherError();
@@ -501,14 +502,24 @@ export const AutoGather: React.FunctionComponent = () => {
     }
   }, []);
 
+  const applyControlledStatus = React.useCallback(
+    (status: AutoGatherControlledState) => {
+      setControlledState(status);
+      if (shouldApplyControlledLibraryScan(status.libraryScan)) {
+        applyResult(status.libraryScan!);
+      }
+    },
+    [applyResult],
+  );
+
   const refreshControlledStatus = React.useCallback(async () => {
     try {
       const status = await Api.getAutoGatherControlledStatus();
-      setControlledState(status);
+      applyControlledStatus(status);
     } catch {
       // ignore transient poll errors
     }
-  }, []);
+  }, [applyControlledStatus]);
 
   React.useEffect(() => {
     void refreshDryRunStatus();
@@ -555,9 +566,9 @@ export const AutoGather: React.FunctionComponent = () => {
       const state = await Api.startAutoGatherControlled({
         confirm: true,
         maxShows: controlledMaxShows,
-        maxBytes: controlledMaxGB * 1024 * 1024 * 1024,
+        maxBytes: bytesFromDecimalGB(controlledMaxGB),
       });
-      setControlledState(state);
+      applyControlledStatus(state);
       toast({
         title: 'Controlled Real Auto Gather started',
         description: `Up to ${controlledMaxShows} shows / ${controlledMaxGB} GB. This is NOT a dry run.`,
@@ -577,7 +588,7 @@ export const AutoGather: React.FunctionComponent = () => {
     setControlledBusy(true);
     try {
       const state = await Api.stopAutoGatherControlled();
-      setControlledState(state);
+      applyControlledStatus(state);
       toast({ title: 'Controlled Auto Gather stop requested' });
     } catch (e) {
       toast({
@@ -593,7 +604,7 @@ export const AutoGather: React.FunctionComponent = () => {
     setControlledBusy(true);
     try {
       const state = await Api.acknowledgeAutoGatherControlled({ confirm: true });
-      setControlledState(state);
+      applyControlledStatus(state);
       toast({
         title: 'Interrupted session acknowledged',
         description: 'The previous session was not resumed. You may start a new operation after verifying the array.',
@@ -1117,12 +1128,23 @@ export const AutoGather: React.FunctionComponent = () => {
                   {controlledState.operationPhase ? ` (${controlledState.operationPhase})` : ''}
                 </div>
                 <div>
-                  Bounds: {controlledState.maxShows} shows / {humanBytes(controlledState.maxBytes)}
+                  Bounds: {controlledState.maxShows} shows / {formatByteBoundAsGB(controlledState.maxBytes)}
                 </div>
                 <div>
                   Completed: {(controlledState.completed?.length || 0)} shows;{' '}
                   {humanBytes(controlledState.cumulativeBytes || 0)} moved
                 </div>
+                {(controlledState.completed?.length || 0) > 0 && (
+                  <ul className="list-disc pl-5 text-xs">
+                    {controlledState.completed!.map((item) => (
+                      <li key={item.showPath}>
+                        {item.showName || item.showPath}
+                        {item.targetDisk ? ` → ${item.targetDisk}` : ''}
+                        {item.moveBytes ? ` (${humanBytes(item.moveBytes)})` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {(controlledState.skipped?.length || 0) > 0 && (
                   <div>Skipped: {controlledState.skipped!.length}</div>
                 )}
