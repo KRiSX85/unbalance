@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -271,6 +271,62 @@ export class Api {
 
   static async getAutoGatherRealStatus(): Promise<AutoGatherRealState> {
     const response = await fetch(`${Api.host}/auto-gather/real/status`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async startAutoGatherControlled(payload: {
+    confirm: boolean;
+    maxShows: number;
+    maxBytes: number;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to start controlled Auto Gather');
+    }
+    return body;
+  }
+
+  static async stopAutoGatherControlled(): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async acknowledgeAutoGatherControlled(payload: {
+    confirm: boolean;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to acknowledge interrupted Auto Gather');
+    }
+    return body;
+  }
+
+  static async getAutoGatherControlledStatus(): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/status`, {
       credentials: 'same-origin',
     });
     if (!response.ok) {

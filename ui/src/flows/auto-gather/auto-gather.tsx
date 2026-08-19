@@ -15,7 +15,7 @@ import {
   useAutoGatherResult,
   useAutoGatherScanning,
 } from '~/state/auto-gather';
-import { AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
+import { AutoGatherCanonicalPlanResult, AutoGatherControlledState, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
 import { humanBytes } from '~/helpers/units';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
@@ -23,6 +23,9 @@ import {
   autoGatherRealPermissionWarningMessage,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
+  isAutoGatherControlledActivePhase,
+  isAutoGatherControlledInterruptedPhase,
+  canAcknowledgeAutoGatherControlled,
   isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
@@ -107,9 +110,10 @@ const ShowRow: React.FunctionComponent<{
   show: AutoGatherShow;
   realBusy: boolean;
   dryRunActive: boolean;
+  opsBlocked?: boolean;
   onPrepareReal: (show: AutoGatherShow) => void;
   preparingReal: boolean;
-}> = ({ show, realBusy, dryRunActive, onPrepareReal, preparingReal }) => {
+}> = ({ show, realBusy, dryRunActive, opsBlocked, onPrepareReal, preparingReal }) => {
   const [expanded, setExpanded] = React.useState(false);
   const [verifying, setVerifying] = React.useState(false);
   const [canonical, setCanonical] =
@@ -329,7 +333,7 @@ const ShowRow: React.FunctionComponent<{
                   variant="outline"
                   size="sm"
                   className="mt-2 border-red-300 dark:border-red-700"
-                  disabled={preparingReal || realBusy || dryRunActive}
+                  disabled={preparingReal || realBusy || dryRunActive || !!opsBlocked}
                   onClick={() => onPrepareReal(show)}
                 >
                   {preparingReal ? 'Preparing…' : 'Prepare real Gather'}
@@ -474,6 +478,10 @@ export const AutoGather: React.FunctionComponent = () => {
   const [realState, setRealState] = React.useState<AutoGatherRealState | null>(null);
   const [realBusy, setRealBusy] = React.useState(false);
   const [preparingShowPath, setPreparingShowPath] = React.useState('');
+  const [controlledState, setControlledState] = React.useState<AutoGatherControlledState | null>(null);
+  const [controlledBusy, setControlledBusy] = React.useState(false);
+  const [controlledMaxShows, setControlledMaxShows] = React.useState(3);
+  const [controlledMaxGB, setControlledMaxGB] = React.useState(50);
 
   const refreshRealStatus = React.useCallback(async () => {
     try {
@@ -493,9 +501,19 @@ export const AutoGather: React.FunctionComponent = () => {
     }
   }, []);
 
+  const refreshControlledStatus = React.useCallback(async () => {
+    try {
+      const status = await Api.getAutoGatherControlledStatus();
+      setControlledState(status);
+    } catch {
+      // ignore transient poll errors
+    }
+  }, []);
+
   React.useEffect(() => {
     void refreshDryRunStatus();
     void refreshRealStatus();
+    void refreshControlledStatus();
   }, [refreshDryRunStatus, refreshRealStatus]);
 
   React.useEffect(() => {
@@ -519,6 +537,76 @@ export const AutoGather: React.FunctionComponent = () => {
     }, 2000);
     return () => window.clearInterval(id);
   }, [realState?.phase, refreshRealStatus]);
+
+  React.useEffect(() => {
+    const phase = controlledState?.phase;
+    if (!isAutoGatherControlledActivePhase(phase) && !isAutoGatherControlledInterruptedPhase(phase)) {
+      return;
+    }
+    const id = window.setInterval(() => {
+      void refreshControlledStatus();
+    }, 2000);
+    return () => window.clearInterval(id);
+  }, [controlledState?.phase, refreshControlledStatus]);
+
+  const onStartControlled = async () => {
+    setControlledBusy(true);
+    try {
+      const state = await Api.startAutoGatherControlled({
+        confirm: true,
+        maxShows: controlledMaxShows,
+        maxBytes: controlledMaxGB * 1024 * 1024 * 1024,
+      });
+      setControlledState(state);
+      toast({
+        title: 'Controlled Real Auto Gather started',
+        description: `Up to ${controlledMaxShows} shows / ${controlledMaxGB} GB. This is NOT a dry run.`,
+      });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to start controlled Auto Gather',
+        variant: 'destructive',
+      });
+      await refreshControlledStatus();
+    } finally {
+      setControlledBusy(false);
+    }
+  };
+
+  const onStopControlled = async () => {
+    setControlledBusy(true);
+    try {
+      const state = await Api.stopAutoGatherControlled();
+      setControlledState(state);
+      toast({ title: 'Controlled Auto Gather stop requested' });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to stop',
+        variant: 'destructive',
+      });
+    } finally {
+      setControlledBusy(false);
+    }
+  };
+
+  const onAcknowledgeControlled = async () => {
+    setControlledBusy(true);
+    try {
+      const state = await Api.acknowledgeAutoGatherControlled({ confirm: true });
+      setControlledState(state);
+      toast({
+        title: 'Interrupted session acknowledged',
+        description: 'The previous session was not resumed. You may start a new operation after verifying the array.',
+      });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to acknowledge interrupted session',
+        variant: 'destructive',
+      });
+    } finally {
+      setControlledBusy(false);
+    }
+  };
 
   const onStartDryRun = async () => {
     setDryRunBusy(true);
@@ -708,12 +796,13 @@ export const AutoGather: React.FunctionComponent = () => {
   const dryRunActive = dryRunPhase === 'running' || dryRunPhase === 'stopping';
   const realPhase = realState?.phase ?? 'idle';
   const realExecutionActive = isAutoGatherRealExecutionPhase(realPhase);
+  const controlledInterrupted = isAutoGatherControlledInterruptedPhase(controlledState?.phase);
   const stopEnabled = isAutoGatherStopEnabled(dryRunPhase, realPhase);
   const showConfirmPanel = shouldShowAutoGatherRealConfirmPanel(realState);
   const preparedMove = showConfirmPanel ? realState?.prepared ?? null : null;
   const confirmEnabled = canConfirmAutoGatherRealMove({
     globalDryRun: globalDryRun || !!realState?.globalDryRun,
-    busy: realBusy,
+    busy: realBusy || controlledInterrupted,
     executionActive: realExecutionActive,
     prepared: preparedMove,
   });
@@ -758,7 +847,7 @@ export const AutoGather: React.FunctionComponent = () => {
           <div className="flex flex-wrap gap-2 mt-3">
             <Button
               variant="secondary"
-              disabled={!globalDryRun || dryRunBusy || dryRunActive}
+              disabled={!globalDryRun || dryRunBusy || dryRunActive || controlledInterrupted}
               onClick={() => void onStartDryRun()}
             >
               Start dry run
@@ -938,6 +1027,134 @@ export const AutoGather: React.FunctionComponent = () => {
           </div>
         </div>
 
+        {/* Stage 3D: Controlled Real Auto Gather */}
+        {isAutoGatherControlledInterruptedPhase(controlledState?.phase) && (
+          <div className="mt-4 rounded border border-red-400 dark:border-red-700 bg-red-50 dark:bg-red-950/30 p-3 space-y-2">
+            <div className="font-semibold text-red-800 dark:text-red-200">
+              Previous real Auto Gather session was interrupted
+            </div>
+            <div className="text-sm text-red-800 dark:text-red-200">
+              {controlledState?.message}
+            </div>
+            {controlledState?.currentShowName && (
+              <div className="text-sm">
+                Last show: {controlledState.currentShowName}
+                {controlledState.currentTarget ? ` → ${controlledState.currentTarget}` : ''}
+              </div>
+            )}
+            {controlledState?.lastSourceEntry && (
+              <div className="text-sm">Last source entry: {controlledState.lastSourceEntry}</div>
+            )}
+            {controlledState?.rsyncProbe && (
+              <div className="text-sm">
+                Recorded rsync PID: {controlledState.rsyncProbe.pid || 'none'}.{' '}
+                {controlledState.rsyncProbe.note}
+              </div>
+            )}
+            {canAcknowledgeAutoGatherControlled(controlledState) ? (
+              <>
+                <div className="text-xs text-red-700 dark:text-red-300">
+                  Acknowledgement clears this warning only. It does not resume, retry, or kill any process.
+                </div>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  disabled={controlledBusy}
+                  onClick={() => void onAcknowledgeControlled()}
+                >
+                  I have verified the array — acknowledge interruption
+                </Button>
+              </>
+            ) : (
+              <div className="text-sm font-medium text-red-800 dark:text-red-200">
+                Acknowledgement is unavailable while the recorded rsync still appears to be running.
+                Wait for that process to finish or stop it yourself. Unbalanced will not kill it.
+              </div>
+            )}
+          </div>
+        )}
+        {!globalDryRun && (
+          <div className="mt-4 rounded border border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20 p-3 space-y-2">
+            <div className="font-semibold text-orange-900 dark:text-orange-100">
+              Controlled Real Auto Gather (Stage 3D)
+            </div>
+            <div className="text-xs text-orange-800 dark:text-orange-200">
+              Orchestrates multiple one-show real Gather moves sequentially.
+              This is NOT a dry run — files will be moved and successfully transferred sources removed.
+            </div>
+            {(!controlledState || controlledState.phase === 'idle') && (
+              <div className="flex flex-wrap items-center gap-2">
+                <label className="text-sm">Max shows:</label>
+                <Input
+                  className="w-20"
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={controlledMaxShows}
+                  onChange={(e) => setControlledMaxShows(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+                <label className="text-sm">Max GB:</label>
+                <Input
+                  className="w-24"
+                  type="number"
+                  min={1}
+                  value={controlledMaxGB}
+                  onChange={(e) => setControlledMaxGB(Math.max(1, parseInt(e.target.value) || 1))}
+                />
+                <Button
+                  variant="destructive"
+                  disabled={controlledBusy || realExecutionActive || dryRunActive}
+                  onClick={() => void onStartControlled()}
+                >
+                  Start controlled real Auto Gather
+                </Button>
+              </div>
+            )}
+            {controlledState && controlledState.phase !== 'idle' && controlledState.phase !== 'interrupted' && (
+              <div className="text-sm space-y-1">
+                <div>
+                  Phase: <span className="font-medium">{controlledState.phase}</span>
+                  {controlledState.operationPhase ? ` (${controlledState.operationPhase})` : ''}
+                </div>
+                <div>
+                  Bounds: {controlledState.maxShows} shows / {humanBytes(controlledState.maxBytes)}
+                </div>
+                <div>
+                  Completed: {(controlledState.completed?.length || 0)} shows;{' '}
+                  {humanBytes(controlledState.cumulativeBytes || 0)} moved
+                </div>
+                {(controlledState.skipped?.length || 0) > 0 && (
+                  <div>Skipped: {controlledState.skipped!.length}</div>
+                )}
+                {controlledState.currentShowName && (
+                  <div>
+                    Current: {controlledState.currentShowName}
+                    {controlledState.currentTarget ? ` → ${controlledState.currentTarget}` : ''}
+                  </div>
+                )}
+                {controlledState.failureReason && (
+                  <div className="text-red-700 dark:text-red-300">
+                    Failed: {controlledState.failedShowName || controlledState.failedShow} — {controlledState.failureReason}
+                  </div>
+                )}
+                {controlledState.error && (
+                  <div className="text-red-700 dark:text-red-300">{controlledState.error}</div>
+                )}
+                {isAutoGatherControlledActivePhase(controlledState.phase) && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={controlledBusy}
+                    onClick={() => void onStopControlled()}
+                  >
+                    Stop controlled Auto Gather
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
         <div className="flex flex-row flex-wrap items-center gap-2 mt-4">
           <span className="text-sm text-slate-500 dark:text-gray-500">
             /mnt/user/
@@ -1059,6 +1276,7 @@ export const AutoGather: React.FunctionComponent = () => {
             show={show}
             realBusy={realBusy || realExecutionActive}
             dryRunActive={dryRunActive}
+            opsBlocked={controlledInterrupted}
             onPrepareReal={(s) => void onPrepareReal(s)}
             preparingReal={preparingShowPath === show.path}
           />

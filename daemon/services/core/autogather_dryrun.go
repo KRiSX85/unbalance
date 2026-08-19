@@ -142,6 +142,20 @@ func (c *Core) StartAutoGatherDryRun() (domain.AutoGatherDryRunState, error) {
 			Error:  "Auto Gather real move session is active",
 		}, fmt.Errorf("Auto Gather real move session is active")
 	}
+	if c.isAutoGatherControlledActiveLocked() {
+		return domain.AutoGatherDryRunState{
+			Phase:  domain.AutoGatherDryRunPhaseIdle,
+			DryRun: true,
+			Error:  "Controlled Auto Gather session is active",
+		}, fmt.Errorf("Controlled Auto Gather session is active")
+	}
+	if c.isAutoGatherControlledInterruptedLocked() {
+		return domain.AutoGatherDryRunState{
+			Phase:  domain.AutoGatherDryRunPhaseIdle,
+			DryRun: true,
+			Error:  "a previous controlled Auto Gather session was interrupted; acknowledge it before starting dry-run",
+		}, fmt.Errorf("controlled Auto Gather session was interrupted")
+	}
 	if c.state == nil || c.state.Status != common.OpNeutral {
 		return domain.AutoGatherDryRunState{
 			Phase:  domain.AutoGatherDryRunPhaseIdle,

@@ -129,6 +129,10 @@ func (c *Core) runCommand(operation *domain.Operation, command *domain.Command) 
 	if err != nil {
 		return 0, err
 	}
+	if cmd != nil && cmd.Process != nil {
+		c.noteControlledRsyncChild(cmd.Process.Pid, paths.Entry)
+		defer c.clearControlledRsyncChild()
+	}
 
 	// give some time for /proc/pid to come alive
 	time.Sleep(500 * time.Millisecond)

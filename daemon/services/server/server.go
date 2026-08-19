@@ -123,6 +123,10 @@ func (s *Server) Start() error {
 	protected.POST("/auto-gather/real/cancel", s.autoGatherRealCancel, s.requireCSRF)
 	protected.POST("/auto-gather/real/stop", s.autoGatherRealStop, s.requireCSRF)
 	protected.GET("/auto-gather/real/status", s.autoGatherRealStatus)
+	protected.POST("/auto-gather/controlled/start", s.autoGatherControlledStart, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/stop", s.autoGatherControlledStop, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/acknowledge", s.autoGatherControlledAcknowledge, s.requireCSRF)
+	protected.GET("/auto-gather/controlled/status", s.autoGatherControlledStatus)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -390,6 +394,38 @@ func (s *Server) autoGatherRealCancel(c echo.Context) error {
 
 func (s *Server) autoGatherRealStatus(c echo.Context) error {
 	return c.JSON(200, s.core.GetAutoGatherRealState())
+}
+
+func (s *Server) autoGatherControlledStart(c echo.Context) error {
+	var req domain.AutoGatherControlledStartRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid controlled start request")
+	}
+	state, err := s.core.StartAutoGatherControlled(req)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherControlledStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherControlled())
+}
+
+func (s *Server) autoGatherControlledAcknowledge(c echo.Context) error {
+	var req domain.AutoGatherControlledAcknowledgeRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid acknowledge request")
+	}
+	state, err := s.core.AcknowledgeAutoGatherControlledInterrupted(req.Confirm)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherControlledStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherControlledState())
 }
 
 func (s *Server) setTvLibraryPath(c echo.Context) error {

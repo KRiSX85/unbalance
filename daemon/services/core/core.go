@@ -75,6 +75,10 @@ type Core struct {
 	autoGatherRealState         *domain.AutoGatherRealState
 	autoGatherRealStopRequested bool
 	autoGatherRealExec          bool // Stage 3C real Gather execution in progress
+
+	autoGatherControlledRun           *domain.AutoGatherControlledState
+	autoGatherControlledStopRequested bool
+	autoGatherControlledShutdown      bool
 }
 
 func Create(ctx *domain.Context) *Core {
@@ -127,12 +131,15 @@ func (c *Core) Start() error {
 
 	c.sid = sid
 
+	c.RecoverAutoGatherControlledInterrupted()
+
 	go c.mailboxHandler()
 
 	return nil
 }
 
 func (c *Core) Stop() error {
+	c.persistAutoGatherControlledForShutdown()
 	return nil
 }
 
@@ -225,10 +232,10 @@ func (c *Core) mailboxHandler() {
 	}
 }
 
-// mailboxAllows gates manual Gather/Scatter commands while Stage 3B or Stage 3C
-// real execution is active. The Auto Gather session-active flags are authoritative
-// across temporary Status transitions (e.g. OpGatherMove during sync ops).
-// Stop remains available during Auto Gather dry-run/real and in-flight Gather moves.
+// mailboxAllows gates manual Gather/Scatter commands while Stage 3B/3C/3D
+// execution is active, or while a previous Stage 3D session was interrupted
+// and has not been acknowledged. Stop remains available during Auto Gather
+// dry-run/real and in-flight Gather moves.
 func (c *Core) mailboxAllows(topic string) bool {
 	if topic == common.CommandStop {
 		return c.state.Status == common.OpGatherMove ||
@@ -237,7 +244,7 @@ func (c *Core) mailboxAllows(topic string) bool {
 			c.isAutoGatherDryRunActive() ||
 			c.isAutoGatherRealExecutionBusy()
 	}
-	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() {
+	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() || c.autoGatherControlledBlocksRealOps() {
 		return false
 	}
 	if c.state.Status == common.OpNeutral {

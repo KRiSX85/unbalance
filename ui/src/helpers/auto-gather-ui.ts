@@ -199,6 +199,46 @@ export function shouldFollowTransferEndedNavigation(
   return !shouldKeepAutoGatherPageVisible(status, dryRunPhase, realPhase);
 }
 
+export function isAutoGatherControlledActivePhase(phase?: string | null): boolean {
+  return phase === 'running' || phase === 'stopping';
+}
+
+export function isAutoGatherControlledInterruptedPhase(phase?: string | null): boolean {
+  return phase === 'interrupted';
+}
+
+export function autoGatherControlledLiveRsyncBlocksAck(
+  probe?: { alive?: boolean; plausibleRsync?: boolean } | null,
+): boolean {
+  return Boolean(probe?.alive && probe?.plausibleRsync);
+}
+
+export function canAcknowledgeAutoGatherControlled(state?: {
+  phase?: string;
+  canAcknowledge?: boolean;
+  rsyncProbe?: { alive?: boolean; plausibleRsync?: boolean } | null;
+} | null): boolean {
+  if (!isAutoGatherControlledInterruptedPhase(state?.phase)) {
+    return false;
+  }
+  if (state?.canAcknowledge === false) {
+    return false;
+  }
+  return !autoGatherControlledLiveRsyncBlocksAck(state?.rsyncProbe);
+}
+
+export function shouldKeepAutoGatherPageForControlled(
+  controlledPhase?: string | null,
+): boolean {
+  return (
+    isAutoGatherControlledActivePhase(controlledPhase) ||
+    controlledPhase === 'stopped' ||
+    controlledPhase === 'failed' ||
+    controlledPhase === 'completed' ||
+    controlledPhase === 'interrupted'
+  );
+}
+
 export function headerShowsBusy(status: Op): boolean {
   return status !== Op.Neutral;
 }

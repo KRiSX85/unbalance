@@ -10,6 +10,10 @@ import {
   isAutoGatherRealActivePhase,
   isAutoGatherStopEnabled,
   isAutoGatherTerminalPhase,
+  isAutoGatherControlledInterruptedPhase,
+  canAcknowledgeAutoGatherControlled,
+  autoGatherControlledLiveRsyncBlocksAck,
+  shouldKeepAutoGatherPageForControlled,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
   routeForLoadedState,
@@ -393,5 +397,43 @@ describe('Auto Gather Stage 3C permission warnings', () => {
     expect(
       autoGatherRealPermissionWarningMessage(status.prepared?.permissionWarnings),
     ).toContain('1 owner(s); 3 folder(s); 4 file(s)');
+  });
+});
+
+describe('Auto Gather Stage 3D interrupted recovery', () => {
+  it('treats interrupted as a recovered Auto Gather page state that is not idle', () => {
+    expect(isAutoGatherControlledInterruptedPhase('interrupted')).toBe(true);
+    expect(isAutoGatherControlledInterruptedPhase('idle')).toBe(false);
+    expect(shouldKeepAutoGatherPageForControlled('interrupted')).toBe(true);
+  });
+
+  it('blocks acknowledgement while a recorded rsync PID is still live', () => {
+    expect(
+      autoGatherControlledLiveRsyncBlocksAck({ alive: true, plausibleRsync: true }),
+    ).toBe(true);
+    expect(
+      canAcknowledgeAutoGatherControlled({
+        phase: 'interrupted',
+        canAcknowledge: false,
+        rsyncProbe: { alive: true, plausibleRsync: true },
+      }),
+    ).toBe(false);
+  });
+
+  it('allows acknowledgement when the PID is gone or is not rsync', () => {
+    expect(
+      canAcknowledgeAutoGatherControlled({
+        phase: 'interrupted',
+        canAcknowledge: true,
+        rsyncProbe: { alive: false, plausibleRsync: false },
+      }),
+    ).toBe(true);
+    expect(
+      canAcknowledgeAutoGatherControlled({
+        phase: 'interrupted',
+        canAcknowledge: true,
+        rsyncProbe: { alive: true, plausibleRsync: false },
+      }),
+    ).toBe(true);
   });
 });

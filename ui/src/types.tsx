@@ -203,6 +203,51 @@ export interface AutoGatherRealState {
   stoppedMessage?: string;
 }
 
+export interface AutoGatherControlledShowRecord {
+  showPath: string;
+  showName?: string;
+  targetDisk?: string;
+  moveBytes?: number;
+  permissionWarnings?: AutoGatherRealPermissionWarnings;
+  reason?: string;
+  at?: string;
+}
+
+export interface AutoGatherControlledRsyncProbe {
+  pid?: number;
+  alive?: boolean;
+  plausibleRsync?: boolean;
+  command?: string;
+  note?: string;
+}
+
+export interface AutoGatherControlledState {
+  phase: string;
+  globalDryRun: boolean;
+  maxShows: number;
+  maxBytes: number;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  operationPhase?: string;
+  completed?: AutoGatherControlledShowRecord[];
+  skipped?: AutoGatherControlledShowRecord[];
+  cumulativeBytes?: number;
+  failedShow?: string;
+  failedShowName?: string;
+  failureReason?: string;
+  startedAt?: string;
+  endedAt?: string;
+  message?: string;
+  error?: string;
+  sessionId?: string;
+  lastRsyncPid?: number;
+  lastSourceEntry?: string;
+  rsyncProbe?: AutoGatherControlledRsyncProbe;
+  requiresAcknowledgement?: boolean;
+  canAcknowledge?: boolean;
+}
+
 export interface AuthStatus {
   enabled: boolean;
   configured: boolean;

@@ -65,6 +65,16 @@ func (c *Core) PrepareAutoGatherReal(req domain.AutoGatherRealPrepareRequest) do
 		result.Error = "Auto Gather dry-run is active; stop it before preparing a real move"
 		return result
 	}
+	if c.isAutoGatherControlledActiveLocked() {
+		c.autoGatherMu.Unlock()
+		result.Error = "Controlled Auto Gather session is active"
+		return result
+	}
+	if c.isAutoGatherControlledInterruptedLocked() {
+		c.autoGatherMu.Unlock()
+		result.Error = "a previous controlled Auto Gather session was interrupted; acknowledge it before preparing a real move"
+		return result
+	}
 	if c.state == nil {
 		c.autoGatherMu.Unlock()
 		result.Error = "internal state is not available"
@@ -204,6 +214,10 @@ func (c *Core) ExecuteAutoGatherReal(req domain.AutoGatherRealExecuteRequest) (d
 		state.Error = "Auto Gather real execution requires global dry-run mode to be disabled"
 		return state, fmt.Errorf("%s", state.Error)
 	}
+	if c.isAutoGatherControlledInterrupted() {
+		state.Error = "a previous controlled Auto Gather session was interrupted; acknowledge it before executing a real move"
+		return state, fmt.Errorf("%s", state.Error)
+	}
 	if strings.TrimSpace(req.PreparationID) == "" {
 		state.Error = "missing preparation token"
 		return state, fmt.Errorf("%s", state.Error)
@@ -243,6 +257,16 @@ func (c *Core) ExecuteAutoGatherReal(req domain.AutoGatherRealExecuteRequest) (d
 	if c.isAutoGatherRealExecutionBusyLocked() {
 		c.autoGatherMu.Unlock()
 		state.Error = "Auto Gather real move is already executing"
+		return state, fmt.Errorf("%s", state.Error)
+	}
+	if c.isAutoGatherControlledInterruptedLocked() {
+		c.autoGatherMu.Unlock()
+		state.Error = "a previous controlled Auto Gather session was interrupted; acknowledge it before executing a real move"
+		return state, fmt.Errorf("%s", state.Error)
+	}
+	if c.isAutoGatherControlledActiveLocked() {
+		c.autoGatherMu.Unlock()
+		state.Error = "Controlled Auto Gather session is active"
 		return state, fmt.Errorf("%s", state.Error)
 	}
 	if c.state == nil || c.state.Status != common.OpNeutral {
