@@ -85,6 +85,7 @@ export interface AutoGatherScanResult {
   warnings?: string[];
   error?: string;
   cancelled?: boolean;
+  revision?: number;
 }
 
 export interface AutoGatherCanonicalTarget {
@@ -246,7 +247,16 @@ export interface AutoGatherControlledState {
   rsyncProbe?: AutoGatherControlledRsyncProbe;
   requiresAcknowledgement?: boolean;
   canAcknowledge?: boolean;
-  libraryScan?: AutoGatherScanResult;
+  libraryRevision?: number;
+  librarySummary?: AutoGatherLibrarySummary;
+}
+
+export interface AutoGatherLibrarySummary {
+  revision: number;
+  libraryPath?: string;
+  showCount: number;
+  splitCount: number;
+  recommendationCount: number;
 }
 
 export interface AuthStatus {

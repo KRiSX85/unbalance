@@ -335,6 +335,16 @@ export class Api {
     return response.json();
   }
 
+  static async getAutoGatherLibrary(): Promise<AutoGatherScanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/library`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
   static async setTvLibraryPath(path: string): Promise<string> {
     const options = {
       method: 'PUT',

@@ -1,5 +1,5 @@
-import { Op, AutoGatherRealPermissionWarnings, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherScanResult } from '~/types';
-import { getRouteFromStatus } from '~/helpers/routes';
+import { Op, AutoGatherRealPermissionWarnings, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherScanResult, AutoGatherShow } from '~/types';
+import { canonicalAppPath, getRouteFromStatus } from '~/helpers/routes';
 
 export function isAutoGatherDryRunActivePhase(phase?: string | null): boolean {
   return phase === 'running' || phase === 'stopping';
@@ -170,13 +170,16 @@ export function shouldKeepAutoGatherPageVisible(
   status: Op,
   dryRunPhase?: string | null,
   realPhase?: string | null,
+  controlledPhase?: string | null,
 ): boolean {
   return (
     status === Op.AutoGatherDryRun ||
     status === Op.AutoGatherReal ||
     isAutoGatherDryRunActivePhase(dryRunPhase) ||
     isAutoGatherRealActivePhase(realPhase) ||
-    isAutoGatherRealExpiredPhase(realPhase)
+    isAutoGatherRealExpiredPhase(realPhase) ||
+    isAutoGatherControlledActivePhase(controlledPhase) ||
+    isAutoGatherControlledInterruptedPhase(controlledPhase)
   );
 }
 
@@ -184,11 +187,22 @@ export function routeForLoadedState(
   status: Op,
   dryRunPhase?: string | null,
   realPhase?: string | null,
+  options?: { pathname?: string | null; controlledPhase?: string | null },
 ): string {
-  if (shouldKeepAutoGatherPageVisible(status, dryRunPhase, realPhase)) {
+  if (
+    shouldKeepAutoGatherPageVisible(
+      status,
+      dryRunPhase,
+      realPhase,
+      options?.controlledPhase,
+    )
+  ) {
     return '/auto-gather';
   }
-  return getRouteFromStatus(status);
+  if (status !== Op.Neutral) {
+    return getRouteFromStatus(status);
+  }
+  return canonicalAppPath(options?.pathname) ?? '/scatter/select';
 }
 
 export function shouldFollowTransferEndedNavigation(
@@ -246,6 +260,34 @@ export function shouldApplyControlledLibraryScan(
     return false;
   }
   return Array.isArray(scan.shows);
+}
+
+export function controlledLibraryRevision(
+  status?: { libraryRevision?: number; librarySummary?: { revision?: number } } | null,
+): number {
+  return status?.libraryRevision || status?.librarySummary?.revision || 0;
+}
+
+export function normalizeAutoGatherShow(show: AutoGatherShow): AutoGatherShow {
+  return {
+    ...show,
+    videoDisks: show.videoDisks ?? [],
+    sidecarOnlyDisks: show.sidecarOnlyDisks ?? [],
+    emptyOnlyDisks: show.emptyOnlyDisks ?? [],
+    cachePoolsWithVideo: show.cachePoolsWithVideo ?? [],
+    cleanupCandidateDisks: show.cleanupCandidateDisks ?? [],
+    gatherTargets: show.gatherTargets ?? [],
+  };
+}
+
+export function normalizeAutoGatherScanResult(
+  scan: AutoGatherScanResult,
+): AutoGatherScanResult {
+  return {
+    ...scan,
+    shows: (scan.shows ?? []).map(normalizeAutoGatherShow),
+    warnings: scan.warnings ?? [],
+  };
 }
 
 export function headerShowsBusy(status: Op): boolean {

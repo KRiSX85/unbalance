@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { AutoGatherRealState, Op } from '~/types';
+import { AutoGatherRealState, AutoGatherShow, Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
@@ -14,6 +14,8 @@ import {
   canAcknowledgeAutoGatherControlled,
   autoGatherControlledLiveRsyncBlocksAck,
   shouldApplyControlledLibraryScan,
+  normalizeAutoGatherShow,
+  controlledLibraryRevision,
   shouldKeepAutoGatherPageForControlled,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
@@ -470,5 +472,30 @@ describe('Auto Gather Stage 3D library snapshot apply', () => {
       }),
     ).toBe(false);
     expect(shouldApplyControlledLibraryScan(undefined)).toBe(false);
+  });
+
+  it('reads the library revision from compact controlled/status fields', () => {
+    expect(controlledLibraryRevision({ libraryRevision: 4 })).toBe(4);
+    expect(
+      controlledLibraryRevision({ librarySummary: { revision: 7 } }),
+    ).toBe(7);
+    expect(controlledLibraryRevision({})).toBe(0);
+  });
+
+  it('reproduces the ShowRow crash on null disk arrays and normalizes it', () => {
+    const raw = {
+      name: 'The Fresh Prince of Bel-Air (1990)',
+      path: 'data/media/tv/The Fresh Prince of Bel-Air (1990)',
+      status: 'split',
+      split: true,
+      ready: true,
+      totalVideoBytes: 1,
+      totalBytes: 1,
+    } as AutoGatherShow;
+    expect(() => raw.videoDisks.filter(() => true)).toThrow();
+    expect(() => raw.cachePoolsWithVideo.length).toThrow();
+    const normalized = normalizeAutoGatherShow(raw);
+    expect(normalized.videoDisks.filter(() => true)).toEqual([]);
+    expect(normalized.cachePoolsWithVideo.length).toBe(0);
   });
 });

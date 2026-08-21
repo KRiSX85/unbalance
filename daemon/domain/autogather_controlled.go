@@ -75,8 +75,25 @@ type AutoGatherControlledState struct {
 	RsyncProbe              *AutoGatherControlledRsyncProbe  `json:"rsyncProbe,omitempty"`
 	RequiresAcknowledgement bool                             `json:"requiresAcknowledgement,omitempty"`
 	CanAcknowledge          bool                             `json:"canAcknowledge,omitempty"`
-	// LibraryScan is the latest Stage 1+2 library snapshot already produced
-	// by the controlled session. Presentation only; the browser must not
-	// treat it as orchestration state.
-	LibraryScan *AutoGatherScanResult `json:"libraryScan,omitempty"`
+	// LibraryRevision/LibrarySummary are compact presentation hints. The
+	// full Stage 1+2 dataset is never included in controlled/status; the
+	// browser fetches it separately when the revision changes.
+	LibraryRevision uint64                    `json:"libraryRevision,omitempty"`
+	LibrarySummary  *AutoGatherLibrarySummary `json:"librarySummary,omitempty"`
+}
+
+// AutoGatherLibrarySummary is a lightweight count snapshot for Stage 3D status.
+type AutoGatherLibrarySummary struct {
+	Revision            uint64 `json:"revision"`
+	LibraryPath         string `json:"libraryPath,omitempty"`
+	ShowCount           int    `json:"showCount"`
+	SplitCount          int    `json:"splitCount"`
+	RecommendationCount int    `json:"recommendationCount"`
+}
+
+// AutoGatherLibraryView is the already-computed library dataset for presentation.
+// GET /auto-gather/library returns this without walking the filesystem.
+type AutoGatherLibraryView struct {
+	Revision uint64 `json:"revision"`
+	AutoGatherScanResult
 }

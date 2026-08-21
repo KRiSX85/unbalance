@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { immer } from 'zustand/middleware/immer';
 
 import { Api } from '~/api';
+import { normalizeAutoGatherScanResult } from '~/helpers/auto-gather-ui';
 import { AutoGatherScanResult, AutoGatherShow } from '~/types';
 
 interface AutoGatherStore {
@@ -30,7 +31,7 @@ export const useAutoGatherStore = create<AutoGatherStore>()(
         try {
           const result = await Api.scanAutoGather();
           set((state) => {
-            state.result = result;
+            state.result = normalizeAutoGatherScanResult(result);
             state.error = result.error || '';
             state.scanning = false;
           });
@@ -47,7 +48,7 @@ export const useAutoGatherStore = create<AutoGatherStore>()(
           if (state.scanning) {
             return;
           }
-          state.result = result;
+          state.result = normalizeAutoGatherScanResult(result);
           state.error = result.error || '';
         });
       },

@@ -29,6 +29,7 @@ import {
   isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
+  controlledLibraryRevision,
   shouldApplyControlledLibraryScan,
   shouldPollAutoGatherRealStatus,
   shouldShowAutoGatherRealConfirmPanel,
@@ -121,7 +122,7 @@ const ShowRow: React.FunctionComponent<{
     React.useState<AutoGatherCanonicalPlanResult | null>(null);
   const [canonicalError, setCanonicalError] = React.useState('');
 
-  const videoDisks = show.videoDisks
+  const videoDisks = (show.videoDisks ?? [])
     .filter((disk) => disk.videoBytes > 0 || disk.videoCount > 0)
     .map(
       (disk) =>
@@ -198,7 +199,7 @@ const ShowRow: React.FunctionComponent<{
           </span>
           {diskNames(show.emptyOnlyDisks)}
         </div>
-        {show.cachePoolsWithVideo.length > 0 && (
+        {show.cachePoolsWithVideo && show.cachePoolsWithVideo.length > 0 && (
           <div>
             <span className="text-slate-500 dark:text-gray-500">
               Cache video:{' '}
@@ -502,12 +503,27 @@ export const AutoGather: React.FunctionComponent = () => {
     }
   }, []);
 
+  const appliedLibraryRevision = React.useRef(0);
+
   const applyControlledStatus = React.useCallback(
     (status: AutoGatherControlledState) => {
       setControlledState(status);
-      if (shouldApplyControlledLibraryScan(status.libraryScan)) {
-        applyResult(status.libraryScan!);
+      const revision = controlledLibraryRevision(status);
+      if (revision === 0 || revision === appliedLibraryRevision.current) {
+        return;
       }
+      appliedLibraryRevision.current = revision;
+      void (async () => {
+        try {
+          const snapshot = await Api.getAutoGatherLibrary();
+          if (!shouldApplyControlledLibraryScan(snapshot)) {
+            return;
+          }
+          applyResult(snapshot);
+        } catch {
+          // presentation-only; keep the existing scan store
+        }
+      })();
     },
     [applyResult],
   );

@@ -91,6 +91,7 @@ func (s *Server) Start() error {
 		Browse:     false,
 		HTML5:      true,
 		Filesystem: http.FS(web.Dist),
+		Skipper:    skipStaticForAPIAndWebsocket,
 	}))
 
 	s.engine.GET("/assets/*", echo.WrapHandler(assetsHandler(web.Dist)))
@@ -114,6 +115,7 @@ func (s *Server) Start() error {
 	protected.GET("/locate/:route", s.locate)
 	protected.GET("/size/:route", s.size)
 	protected.GET("/auto-gather/scan", s.autoGatherScan)
+	protected.GET("/auto-gather/library", s.autoGatherLibrary)
 	protected.POST("/auto-gather/canonical-plan", s.autoGatherCanonicalPlan, s.requireCSRF)
 	protected.POST("/auto-gather/dry-run/start", s.autoGatherDryRunStart, s.requireCSRF)
 	protected.POST("/auto-gather/dry-run/stop", s.autoGatherDryRunStop, s.requireCSRF)
@@ -172,6 +174,35 @@ func skipGzipForWebsocket(c echo.Context) bool {
 	}
 	path := c.Request().URL.Path
 	return path == "/ws" || strings.HasSuffix(path, "/ws")
+}
+
+func skipStaticForAPIAndWebsocket(c echo.Context) bool {
+	if c.Request() == nil {
+		return false
+	}
+	path := c.Request().URL.Path
+	if path == "/ws" || strings.HasPrefix(path, "/ws?") {
+		return true
+	}
+	return strings.HasPrefix(path, common.APIEndpoint)
+}
+
+func isSPAClientPath(p string) bool {
+	p = strings.TrimSpace(p)
+	if q := strings.IndexByte(p, '?'); q >= 0 {
+		p = p[:q]
+	}
+	p = strings.TrimSuffix(p, "/")
+	if p == "" {
+		p = "/"
+	}
+	switch p {
+	case "/", "/login", "/auto-gather", "/history", "/settings", "/logs", "/log", "/scatter", "/gather":
+		return true
+	}
+	return strings.HasPrefix(p, "/scatter/") ||
+		strings.HasPrefix(p, "/gather/") ||
+		strings.HasPrefix(p, "/settings/")
 }
 
 func websocketReadIsBenignClose(err error) bool {
@@ -332,6 +363,11 @@ func (s *Server) getLog(c echo.Context) error {
 
 func (s *Server) autoGatherScan(c echo.Context) error {
 	return c.JSON(200, s.core.ScanAutoGather())
+}
+
+func (s *Server) autoGatherLibrary(c echo.Context) error {
+	view, _ := s.core.GetAutoGatherLibrary()
+	return c.JSON(200, view)
 }
 
 func (s *Server) autoGatherCanonicalPlan(c echo.Context) error {

@@ -1,6 +1,7 @@
 package core
 
 import (
+	"encoding/json"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -129,10 +130,24 @@ func TestControlledCompletesOneShow(t *testing.T) {
 	if len(final.Completed) != 1 || final.Completed[0].ShowPath != "data/media/tv/A" {
 		t.Fatalf("completed=%#v", final.Completed)
 	}
-	if final.LibraryScan == nil || len(final.LibraryScan.Shows) != 1 {
-		t.Fatalf("expected published library scan, got %#v", final.LibraryScan)
+	if final.LibraryRevision == 0 || final.LibrarySummary == nil {
+		t.Fatalf("expected compact library summary, got rev=%d summary=%#v", final.LibraryRevision, final.LibrarySummary)
 	}
-	got := final.LibraryScan.Shows[0]
+	if final.LibrarySummary.SplitCount != 0 || final.LibrarySummary.RecommendationCount != 0 {
+		t.Fatalf("completed show should drop split/recommendation counts: %+v", final.LibrarySummary)
+	}
+	raw, err := json.Marshal(final)
+	if err != nil {
+		t.Fatalf("marshal status: %v", err)
+	}
+	if strings.Contains(string(raw), `"libraryScan"`) {
+		t.Fatal("controlled/status must not include full libraryScan")
+	}
+	lib, ok := c.GetAutoGatherLibrary()
+	if !ok || len(lib.Shows) != 1 {
+		t.Fatalf("expected published library snapshot, got ok=%v %#v", ok, lib)
+	}
+	got := lib.Shows[0]
 	if got.Split || got.Status != domain.AutoGatherStatusConsolidated || got.RecommendedTargetDisk != "" {
 		t.Fatalf("completed show should be consolidated in published scan: %+v", got)
 	}
@@ -208,8 +223,12 @@ func TestControlledMaxShowsEnforced(t *testing.T) {
 	if len(final.Completed) != 2 {
 		t.Fatalf("expected 2 completed, got %d", len(final.Completed))
 	}
-	if final.LibraryScan == nil {
-		t.Fatal("expected published library scan after real moves")
+	if final.LibrarySummary == nil || final.LibrarySummary.SplitCount != 8 || final.LibrarySummary.RecommendationCount != 8 {
+		t.Fatalf("library summary after two moves = %+v, want split/recs 8/8", final.LibrarySummary)
+	}
+	lib, ok := c.GetAutoGatherLibrary()
+	if !ok {
+		t.Fatal("expected published library snapshot after real moves")
 	}
 	completed := map[string]struct{}{}
 	for _, rec := range final.Completed {
@@ -217,7 +236,7 @@ func TestControlledMaxShowsEnforced(t *testing.T) {
 	}
 	split := 0
 	recs := 0
-	for _, show := range final.LibraryScan.Shows {
+	for _, show := range lib.Shows {
 		if _, ok := completed[show.Path]; ok {
 			if show.Split || show.Status != domain.AutoGatherStatusConsolidated || show.RecommendedTargetDisk != "" {
 				t.Fatalf("completed show %s still looks split in published scan: %+v", show.Path, show)

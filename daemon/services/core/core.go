@@ -79,6 +79,10 @@ type Core struct {
 	autoGatherControlledRun           *domain.AutoGatherControlledState
 	autoGatherControlledStopRequested bool
 	autoGatherControlledShutdown      bool
+
+	autoGatherLibraryRevision uint64
+	autoGatherLibraryScan     *domain.AutoGatherScanResult
+	autoGatherLibrarySummary  domain.AutoGatherLibrarySummary
 }
 
 func Create(ctx *domain.Context) *Core {

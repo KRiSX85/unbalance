@@ -18,6 +18,8 @@ import {
 import {
   isAutoGatherDryRunActivePhase,
   isAutoGatherRealActivePhase,
+  isAutoGatherControlledActivePhase,
+  isAutoGatherControlledInterruptedPhase,
   routeForLoadedState,
   shouldFollowTransferEndedNavigation,
 } from '~/helpers/auto-gather-ui';
@@ -267,6 +269,7 @@ export const useUnraidStore = create<UnraidStore>()(
           const array = await Api.getUnraid();
           let dryRunPhase: string | undefined;
           let realPhase: string | undefined;
+          let controlledPhase: string | undefined;
           try {
             const dryRun = await Api.getAutoGatherDryRunStatus();
             dryRunPhase = dryRun.phase;
@@ -279,15 +282,29 @@ export const useUnraidStore = create<UnraidStore>()(
           } catch {
             realPhase = undefined;
           }
+          try {
+            const controlled = await Api.getAutoGatherControlledStatus();
+            controlledPhase = controlled.phase;
+          } catch {
+            controlledPhase = undefined;
+          }
 
           console.log('useUnraidStore.getUnraid() ', array);
 
           const dryRunActive = isAutoGatherDryRunActivePhase(dryRunPhase);
           const realActive = isAutoGatherRealActivePhase(realPhase);
-          const autoGatherActive = dryRunActive || realActive;
-          const route = routeForLoadedState(array.status, dryRunPhase, realPhase);
+          const controlledActive =
+            isAutoGatherControlledActivePhase(controlledPhase) ||
+            isAutoGatherControlledInterruptedPhase(controlledPhase);
+          const autoGatherActive = dryRunActive || realActive || controlledActive;
+          const pathname =
+            typeof window !== 'undefined' ? window.location.pathname : '';
+          const route = routeForLoadedState(array.status, dryRunPhase, realPhase, {
+            pathname,
+            controlledPhase,
+          });
           const status = autoGatherActive
-            ? realActive
+            ? realActive || controlledActive
               ? Op.AutoGatherReal
               : Op.AutoGatherDryRun
             : array.status;

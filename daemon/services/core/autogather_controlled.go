@@ -266,9 +266,10 @@ func (c *Core) snapshotAutoGatherControlledLocked() domain.AutoGatherControlledS
 		snap.RsyncProbe = &probe
 		snap.CanAcknowledge = !controlledRsyncProbeBlocksAck(probe)
 	}
-	if snap.LibraryScan != nil {
-		cloned := cloneAutoGatherScanResult(*snap.LibraryScan)
-		snap.LibraryScan = &cloned
+	if c.autoGatherLibraryRevision > 0 {
+		snap.LibraryRevision = c.autoGatherLibraryRevision
+		sum := c.autoGatherLibrarySummary
+		snap.LibrarySummary = &sum
 	}
 	return snap
 }
@@ -594,7 +595,7 @@ func (c *Core) recordAutoGatherControlledCompleted(show domain.AutoGatherShow, t
 	c.autoGatherControlledRun.CurrentShowName = ""
 	c.autoGatherControlledRun.CurrentTarget = ""
 	c.autoGatherControlledRun.OperationPhase = ""
-	markShowConsolidatedInLibraryScan(c.autoGatherControlledRun.LibraryScan, show.Path)
+	c.markCompletedShowInPresentedLibraryLocked(show.Path)
 }
 
 func (c *Core) recordAutoGatherControlledSkipped(show domain.AutoGatherShow, reason string) {
@@ -643,16 +644,66 @@ func (c *Core) publishAutoGatherControlledLibraryScan(scan domain.AutoGatherScan
 	if scan.Cancelled || scan.Error != "" {
 		return
 	}
+	c.storePresentedAutoGatherLibrary(scan, true)
+}
+
+func (c *Core) storePresentedAutoGatherLibrary(scan domain.AutoGatherScanResult, applyCompleted bool) {
 	c.autoGatherMu.Lock()
 	defer c.autoGatherMu.Unlock()
-	if c.autoGatherControlledRun == nil {
+	c.storePresentedAutoGatherLibraryLocked(scan, applyCompleted)
+}
+
+func (c *Core) storePresentedAutoGatherLibraryLocked(scan domain.AutoGatherScanResult, applyCompleted bool) {
+	cloned := cloneAutoGatherScanResult(scan)
+	if applyCompleted && c.autoGatherControlledRun != nil {
+		for _, rec := range c.autoGatherControlledRun.Completed {
+			markShowConsolidatedInLibraryScan(&cloned, rec.ShowPath)
+		}
+	}
+	c.autoGatherLibraryRevision++
+	c.autoGatherLibraryScan = &cloned
+	c.autoGatherLibrarySummary = summarizeAutoGatherLibrary(cloned, c.autoGatherLibraryRevision)
+	if c.autoGatherControlledRun != nil {
+		c.autoGatherControlledRun.LibraryRevision = c.autoGatherLibrarySummary.Revision
+		sum := c.autoGatherLibrarySummary
+		c.autoGatherControlledRun.LibrarySummary = &sum
+	}
+}
+
+func (c *Core) markCompletedShowInPresentedLibraryLocked(showPath string) {
+	if c.autoGatherLibraryScan == nil || showPath == "" {
 		return
 	}
-	cloned := cloneAutoGatherScanResult(scan)
-	for _, rec := range c.autoGatherControlledRun.Completed {
-		markShowConsolidatedInLibraryScan(&cloned, rec.ShowPath)
+	cloned := cloneAutoGatherScanResult(*c.autoGatherLibraryScan)
+	markShowConsolidatedInLibraryScan(&cloned, showPath)
+	c.autoGatherLibraryRevision++
+	c.autoGatherLibraryScan = &cloned
+	c.autoGatherLibrarySummary = summarizeAutoGatherLibrary(cloned, c.autoGatherLibraryRevision)
+	if c.autoGatherControlledRun != nil {
+		c.autoGatherControlledRun.LibraryRevision = c.autoGatherLibrarySummary.Revision
+		sum := c.autoGatherLibrarySummary
+		c.autoGatherControlledRun.LibrarySummary = &sum
 	}
-	c.autoGatherControlledRun.LibraryScan = &cloned
+}
+
+func summarizeAutoGatherLibrary(scan domain.AutoGatherScanResult, revision uint64) domain.AutoGatherLibrarySummary {
+	split := 0
+	recs := 0
+	for _, show := range scan.Shows {
+		if show.Status == domain.AutoGatherStatusSplit || show.Split {
+			split++
+			if show.RecommendedTargetDisk != "" {
+				recs++
+			}
+		}
+	}
+	return domain.AutoGatherLibrarySummary{
+		Revision:            revision,
+		LibraryPath:         scan.LibraryPath,
+		ShowCount:           len(scan.Shows),
+		SplitCount:          split,
+		RecommendationCount: recs,
+	}
 }
 
 func markShowConsolidatedInLibraryScan(scan *domain.AutoGatherScanResult, showPath string) {

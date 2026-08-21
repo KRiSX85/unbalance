@@ -12,7 +12,27 @@ import (
 // saved TvLibraryPath configuration. It does not take the Gather/Scatter
 // operation busy lock, never mutates media, and never persists config.
 func (c *Core) ScanAutoGather() domain.AutoGatherScanResult {
-	return c.scanAutoGatherWithCancel(nil)
+	result := c.scanAutoGatherWithCancel(nil)
+	if !result.Cancelled && result.Error == "" {
+		c.storePresentedAutoGatherLibrary(result, false)
+	}
+	return result
+}
+
+// GetAutoGatherLibrary returns the last already-computed Auto Gather scan
+// without walking the filesystem. ok is false when no snapshot has been stored.
+func (c *Core) GetAutoGatherLibrary() (domain.AutoGatherLibraryView, bool) {
+	c.autoGatherMu.RLock()
+	defer c.autoGatherMu.RUnlock()
+	if c.autoGatherLibraryScan == nil {
+		return domain.AutoGatherLibraryView{
+			AutoGatherScanResult: domain.AutoGatherScanResult{Shows: []domain.AutoGatherShow{}},
+		}, false
+	}
+	return domain.AutoGatherLibraryView{
+		Revision:             c.autoGatherLibraryRevision,
+		AutoGatherScanResult: cloneAutoGatherScanResult(*c.autoGatherLibraryScan),
+	}, true
 }
 
 // scanAutoGatherWithCancel is the Stage-3B-aware scan path. shouldStop nil
