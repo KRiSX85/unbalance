@@ -28,6 +28,13 @@ type AutoGatherControlledAcknowledgeRequest struct {
 	Confirm bool `json:"confirm"`
 }
 
+// AutoGatherControlledResetRequest clears a clean terminal session
+// (completed/stopped/failed) so the operator can configure a new Start.
+// It never starts a session and must not be used for interrupted recovery.
+type AutoGatherControlledResetRequest struct {
+	Confirm bool `json:"confirm"`
+}
+
 // AutoGatherControlledRsyncProbe is a diagnostic snapshot of a recorded rsync
 // child PID after daemon restart. It is never used to kill a process.
 type AutoGatherControlledRsyncProbe struct {

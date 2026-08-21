@@ -13,6 +13,8 @@ import {
   isAutoGatherControlledInterruptedPhase,
   canAcknowledgeAutoGatherControlled,
   autoGatherControlledLiveRsyncBlocksAck,
+  canResetAutoGatherControlled,
+  shouldShowControlledStartControls,
   shouldApplyControlledLibraryScan,
   normalizeAutoGatherShow,
   controlledLibraryRevision,
@@ -438,6 +440,25 @@ describe('Auto Gather Stage 3D interrupted recovery', () => {
         rsyncProbe: { alive: true, plausibleRsync: false },
       }),
     ).toBe(true);
+  });
+
+  it('offers New controlled session only for clean terminal phases', () => {
+    expect(canResetAutoGatherControlled({ phase: 'completed' })).toBe(true);
+    expect(canResetAutoGatherControlled({ phase: 'stopped' })).toBe(true);
+    expect(canResetAutoGatherControlled({ phase: 'failed' })).toBe(true);
+    expect(canResetAutoGatherControlled({ phase: 'interrupted' })).toBe(false);
+    expect(canResetAutoGatherControlled({ phase: 'running' })).toBe(false);
+    expect(canResetAutoGatherControlled({ phase: 'idle' })).toBe(false);
+    expect(shouldShowControlledStartControls('idle')).toBe(true);
+    expect(shouldShowControlledStartControls(undefined)).toBe(true);
+    expect(shouldShowControlledStartControls('completed')).toBe(false);
+    expect(shouldShowControlledStartControls('interrupted')).toBe(false);
+  });
+
+  it('keeps completed summary visible on refresh until an explicit new-session reset', () => {
+    expect(shouldKeepAutoGatherPageForControlled('completed')).toBe(true);
+    expect(shouldShowControlledStartControls('completed')).toBe(false);
+    expect(canResetAutoGatherControlled({ phase: 'completed' })).toBe(true);
   });
 });
 

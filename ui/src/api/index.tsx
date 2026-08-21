@@ -309,6 +309,22 @@ export class Api {
     return response.json();
   }
 
+  static async resetAutoGatherControlled(payload: {
+    confirm: boolean;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to clear finished Auto Gather session');
+    }
+    return body;
+  }
+
   static async acknowledgeAutoGatherControlled(payload: {
     confirm: boolean;
   }): Promise<AutoGatherControlledState> {

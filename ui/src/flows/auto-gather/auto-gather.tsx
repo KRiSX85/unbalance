@@ -26,6 +26,8 @@ import {
   isAutoGatherControlledActivePhase,
   isAutoGatherControlledInterruptedPhase,
   canAcknowledgeAutoGatherControlled,
+  canResetAutoGatherControlled,
+  shouldShowControlledStartControls,
   isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
@@ -635,6 +637,26 @@ export const AutoGather: React.FunctionComponent = () => {
     }
   };
 
+  const onResetControlled = async () => {
+    setControlledBusy(true);
+    try {
+      const state = await Api.resetAutoGatherControlled({ confirm: true });
+      applyControlledStatus(state);
+      toast({
+        title: 'Ready for a new controlled session',
+        description: 'Set Max shows / Max GB, then Start with a fresh confirmation. Nothing has been started.',
+      });
+    } catch (e) {
+      toast({
+        title: e instanceof Error ? e.message : 'Unable to clear finished session',
+        variant: 'destructive',
+      });
+      await refreshControlledStatus();
+    } finally {
+      setControlledBusy(false);
+    }
+  };
+
   const onStartDryRun = async () => {
     setDryRunBusy(true);
     try {
@@ -1109,7 +1131,7 @@ export const AutoGather: React.FunctionComponent = () => {
               Orchestrates multiple one-show real Gather moves sequentially.
               This is NOT a dry run — files will be moved and successfully transferred sources removed.
             </div>
-            {(!controlledState || controlledState.phase === 'idle') && (
+            {shouldShowControlledStartControls(controlledState?.phase) && (
               <div className="flex flex-wrap items-center gap-2">
                 <label className="text-sm">Max shows:</label>
                 <Input
@@ -1187,6 +1209,21 @@ export const AutoGather: React.FunctionComponent = () => {
                   >
                     Stop controlled Auto Gather
                   </Button>
+                )}
+                {canResetAutoGatherControlled(controlledState) && (
+                  <div className="pt-2 space-y-1">
+                    <div className="text-xs text-orange-800 dark:text-orange-200">
+                      Session finished. Start another requires a fresh confirmation; nothing starts automatically.
+                    </div>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={controlledBusy || realExecutionActive || dryRunActive}
+                      onClick={() => void onResetControlled()}
+                    >
+                      New controlled session
+                    </Button>
+                  </div>
                 )}
               </div>
             )}

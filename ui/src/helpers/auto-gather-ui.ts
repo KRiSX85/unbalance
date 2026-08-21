@@ -241,6 +241,18 @@ export function canAcknowledgeAutoGatherControlled(state?: {
   return !autoGatherControlledLiveRsyncBlocksAck(state?.rsyncProbe);
 }
 
+export function isAutoGatherControlledCleanTerminalPhase(phase?: string | null): boolean {
+  return phase === 'completed' || phase === 'stopped' || phase === 'failed';
+}
+
+export function canResetAutoGatherControlled(state?: { phase?: string } | null): boolean {
+  return isAutoGatherControlledCleanTerminalPhase(state?.phase);
+}
+
+export function shouldShowControlledStartControls(phase?: string | null): boolean {
+  return !phase || phase === 'idle';
+}
+
 export function shouldKeepAutoGatherPageForControlled(
   controlledPhase?: string | null,
 ): boolean {

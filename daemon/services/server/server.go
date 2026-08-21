@@ -127,6 +127,7 @@ func (s *Server) Start() error {
 	protected.GET("/auto-gather/real/status", s.autoGatherRealStatus)
 	protected.POST("/auto-gather/controlled/start", s.autoGatherControlledStart, s.requireCSRF)
 	protected.POST("/auto-gather/controlled/stop", s.autoGatherControlledStop, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/reset", s.autoGatherControlledReset, s.requireCSRF)
 	protected.POST("/auto-gather/controlled/acknowledge", s.autoGatherControlledAcknowledge, s.requireCSRF)
 	protected.GET("/auto-gather/controlled/status", s.autoGatherControlledStatus)
 	protected.GET("/logs", s.getLog)
@@ -446,6 +447,18 @@ func (s *Server) autoGatherControlledStart(c echo.Context) error {
 
 func (s *Server) autoGatherControlledStop(c echo.Context) error {
 	return c.JSON(200, s.core.StopAutoGatherControlled())
+}
+
+func (s *Server) autoGatherControlledReset(c echo.Context) error {
+	var req domain.AutoGatherControlledResetRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid controlled reset request")
+	}
+	state, err := s.core.ResetAutoGatherControlledSession(req.Confirm)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
 }
 
 func (s *Server) autoGatherControlledAcknowledge(c echo.Context) error {

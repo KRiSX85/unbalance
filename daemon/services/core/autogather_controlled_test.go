@@ -1162,3 +1162,159 @@ func TestControlledNonRsyncPIDDoesNotBlockAck(t *testing.T) {
 		t.Fatalf("expected idle, got %q", acked.Phase)
 	}
 }
+
+func TestControlledResetCompletedAllowsNewExplicitStart(t *testing.T) {
+	c := newCoreForControlledMarkerTest(t)
+	defer installControlledHooksDefault("data/media/tv/A", "disk1", 100)()
+
+	_, err := c.StartAutoGatherControlled(domain.AutoGatherControlledStartRequest{Confirm: true, MaxShows: 1, MaxBytes: gib(10)})
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+	final := c.GetAutoGatherControlledState()
+	if final.Phase != domain.AutoGatherControlledPhaseCompleted {
+		t.Fatalf("phase=%q", final.Phase)
+	}
+	prevShows, prevBytes := final.MaxShows, final.MaxBytes
+
+	_, err = c.ResetAutoGatherControlledSession(false)
+	if err == nil {
+		t.Fatal("reset without confirm must fail")
+	}
+	status := c.GetAutoGatherControlledState()
+	if status.Phase != domain.AutoGatherControlledPhaseCompleted {
+		t.Fatalf("refused reset must leave completed, got %q", status.Phase)
+	}
+
+	cleared, err := c.ResetAutoGatherControlledSession(true)
+	if err != nil {
+		t.Fatalf("reset completed: %v", err)
+	}
+	if cleared.Phase != domain.AutoGatherControlledPhaseIdle {
+		t.Fatalf("reset must return idle, got %q", cleared.Phase)
+	}
+	if cleared.MaxShows != 0 || cleared.MaxBytes != 0 || len(cleared.Completed) != 0 {
+		t.Fatalf("idle snapshot must not retain previous bounds/authorisation: %+v", cleared)
+	}
+	if c.state.Status != common.OpNeutral {
+		t.Fatalf("reset must not leave a busy op status, got %d", c.state.Status)
+	}
+
+	_, err = c.StartAutoGatherControlled(domain.AutoGatherControlledStartRequest{Confirm: false, MaxShows: 2, MaxBytes: gib(5)})
+	if err == nil {
+		t.Fatal("fresh start after reset still requires explicit confirmation")
+	}
+
+	started, err := c.StartAutoGatherControlled(domain.AutoGatherControlledStartRequest{Confirm: true, MaxShows: 2, MaxBytes: 5_000_000_000})
+	if err != nil {
+		t.Fatalf("start after reset: %v", err)
+	}
+	if started.Phase != domain.AutoGatherControlledPhaseRunning {
+		t.Fatalf("expected running, got %q", started.Phase)
+	}
+	if started.MaxShows != 2 || started.MaxBytes != 5_000_000_000 {
+		t.Fatalf("new session must use fresh bounds, got shows=%d bytes=%d (prev shows=%d bytes=%d)",
+			started.MaxShows, started.MaxBytes, prevShows, prevBytes)
+	}
+	time.Sleep(300 * time.Millisecond)
+	again := c.GetAutoGatherControlledState()
+	if again.Phase != domain.AutoGatherControlledPhaseCompleted {
+		t.Fatalf("second session phase=%q", again.Phase)
+	}
+}
+
+func TestControlledResetStoppedAndFailed(t *testing.T) {
+	c := newCoreForControlledTest()
+	c.autoGatherControlledRun = &domain.AutoGatherControlledState{
+		Phase:     domain.AutoGatherControlledPhaseStopped,
+		MaxShows:  3,
+		MaxBytes:  gib(10),
+		SessionID: "stop-session",
+	}
+	cleared, err := c.ResetAutoGatherControlledSession(true)
+	if err != nil {
+		t.Fatalf("reset stopped: %v", err)
+	}
+	if cleared.Phase != domain.AutoGatherControlledPhaseIdle {
+		t.Fatalf("stopped reset want idle, got %q", cleared.Phase)
+	}
+
+	c.autoGatherControlledRun = &domain.AutoGatherControlledState{
+		Phase:         domain.AutoGatherControlledPhaseFailed,
+		FailedShow:    "data/media/tv/A",
+		FailureReason: "verification failed",
+		SessionID:     "fail-session",
+	}
+	cleared, err = c.ResetAutoGatherControlledSession(true)
+	if err != nil {
+		t.Fatalf("reset failed: %v", err)
+	}
+	if cleared.Phase != domain.AutoGatherControlledPhaseIdle {
+		t.Fatalf("failed reset want idle, got %q", cleared.Phase)
+	}
+	if cleared.FailureReason != "" {
+		t.Fatalf("idle after reset must clear failure diagnostics from status: %q", cleared.FailureReason)
+	}
+}
+
+func TestControlledResetRefusesInterruptedAndActive(t *testing.T) {
+	c := recoverInterruptedWithPID(t, 4242)
+	t.Cleanup(func() { autoGatherControlledRsyncProbeHook = nil })
+	autoGatherControlledRsyncProbeHook = func(pid int) domain.AutoGatherControlledRsyncProbe {
+		return domain.AutoGatherControlledRsyncProbe{PID: pid, Alive: true, PlausibleRsync: true, Note: "live"}
+	}
+
+	_, err := c.ResetAutoGatherControlledSession(true)
+	if err == nil || !strings.Contains(err.Error(), "acknowledgement") {
+		t.Fatalf("interrupted must refuse normal reset, err=%v", err)
+	}
+	if c.GetAutoGatherControlledState().Phase != domain.AutoGatherControlledPhaseInterrupted {
+		t.Fatal("interrupted must remain interrupted after refused reset")
+	}
+	_, ackErr := c.AcknowledgeAutoGatherControlledInterrupted(true)
+	if ackErr == nil {
+		t.Fatal("live rsync must still block acknowledgement")
+	}
+
+	c2 := newCoreForControlledTest()
+	c2.autoGatherControlledRun = &domain.AutoGatherControlledState{
+		Phase:     domain.AutoGatherControlledPhaseRunning,
+		SessionID: "active",
+	}
+	_, err = c2.ResetAutoGatherControlledSession(true)
+	if err == nil || !strings.Contains(err.Error(), "active") {
+		t.Fatalf("active session must refuse reset, err=%v", err)
+	}
+}
+
+func TestControlledResetDoesNotStartOperation(t *testing.T) {
+	c := newCoreForControlledTest()
+	execCalls := 0
+	defer installControlledHooksDefault("data/media/tv/A", "disk1", 100)()
+	prevExec := autoGatherControlledExecuteHook
+	autoGatherControlledExecuteHook = func(c *Core, plan *domain.Plan, tp string) gatherExecResult {
+		execCalls++
+		return prevExec(c, plan, tp)
+	}
+
+	c.autoGatherControlledRun = &domain.AutoGatherControlledState{
+		Phase:     domain.AutoGatherControlledPhaseCompleted,
+		MaxShows:  1,
+		SessionID: "done",
+	}
+	cleared, err := c.ResetAutoGatherControlledSession(true)
+	if err != nil {
+		t.Fatalf("reset: %v", err)
+	}
+	if cleared.Phase != domain.AutoGatherControlledPhaseIdle {
+		t.Fatalf("phase=%q", cleared.Phase)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if execCalls != 0 {
+		t.Fatalf("reset must not start Gather execution, execCalls=%d", execCalls)
+	}
+	if c.state.Status != common.OpNeutral {
+		t.Fatalf("reset must leave OpNeutral, got %d", c.state.Status)
+	}
+}

@@ -161,6 +161,53 @@ func (c *Core) GetAutoGatherControlledState() domain.AutoGatherControlledState {
 	return c.snapshotAutoGatherControlledLocked()
 }
 
+// ResetAutoGatherControlledSession clears a clean terminal Stage 3D session
+// (completed, stopped, or failed) back to idle so a new explicitly confirmed
+// Start can be configured. It never resumes or starts execution, and it
+// refuses interrupted sessions (use Acknowledge instead).
+func (c *Core) ResetAutoGatherControlledSession(confirm bool) (domain.AutoGatherControlledState, error) {
+	if !confirm {
+		c.autoGatherMu.RLock()
+		defer c.autoGatherMu.RUnlock()
+		snap := c.snapshotAutoGatherControlledLocked()
+		snap.Error = "explicit confirmation is required to clear a finished Auto Gather session"
+		return snap, fmt.Errorf("explicit confirmation required")
+	}
+
+	c.autoGatherMu.Lock()
+	defer c.autoGatherMu.Unlock()
+
+	if c.autoGatherControlledRun == nil {
+		return c.snapshotAutoGatherControlledLocked(), nil
+	}
+
+	phase := c.autoGatherControlledRun.Phase
+	switch phase {
+	case domain.AutoGatherControlledPhaseCompleted,
+		domain.AutoGatherControlledPhaseStopped,
+		domain.AutoGatherControlledPhaseFailed:
+		// clean terminal: safe to clear for a new explicit Start
+	case domain.AutoGatherControlledPhaseInterrupted:
+		snap := c.snapshotAutoGatherControlledLocked()
+		snap.Error = "interrupted Auto Gather sessions must be acknowledged; they cannot use the normal new-session reset"
+		return snap, fmt.Errorf("interrupted session requires acknowledgement")
+	case domain.AutoGatherControlledPhaseRunning, domain.AutoGatherControlledPhaseStopping:
+		snap := c.snapshotAutoGatherControlledLocked()
+		snap.Error = "cannot clear an active Auto Gather session; stop it first"
+		return snap, fmt.Errorf("controlled Auto Gather session is still active")
+	default:
+		snap := c.snapshotAutoGatherControlledLocked()
+		snap.Error = fmt.Sprintf("cannot clear Auto Gather session in phase %q", phase)
+		return snap, fmt.Errorf("unsupported controlled session phase")
+	}
+
+	autoGatherControlledLog("clean terminal session cleared for new start previousPhase=%s id=%s", phase, c.autoGatherControlledRun.SessionID)
+	c.autoGatherControlledRun = nil
+	c.autoGatherControlledStopRequested = false
+	c.removeAutoGatherControlledMarkerLocked(true)
+	return c.snapshotAutoGatherControlledLocked(), nil
+}
+
 // AcknowledgeAutoGatherControlledInterrupted clears a persisted interrupted
 // session after explicit operator confirmation. It never resumes execution.
 func (c *Core) AcknowledgeAutoGatherControlledInterrupted(confirm bool) (domain.AutoGatherControlledState, error) {
