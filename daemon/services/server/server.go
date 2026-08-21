@@ -79,7 +79,9 @@ func (s *Server) Start() error {
 
 	s.engine.Use(middleware.Recover())
 	s.engine.Use(middleware.CORS())
-	s.engine.Use(middleware.Gzip())
+	s.engine.Use(middleware.GzipWithConfig(middleware.GzipConfig{
+		Skipper: skipGzipForWebsocket,
+	}))
 	// s.engine.Use(middleware.Logger())
 
 	// serves index.html and favicon related assets on the root path (coming from public folder, built into dist folder)
@@ -89,6 +91,7 @@ func (s *Server) Start() error {
 		Browse:     false,
 		HTML5:      true,
 		Filesystem: http.FS(web.Dist),
+		Skipper:    skipStaticForAPIAndWebsocket,
 	}))
 
 	s.engine.GET("/assets/*", echo.WrapHandler(assetsHandler(web.Dist)))
@@ -111,6 +114,22 @@ func (s *Server) Start() error {
 	protected.GET("/tree/:route", s.getTree)
 	protected.GET("/locate/:route", s.locate)
 	protected.GET("/size/:route", s.size)
+	protected.GET("/auto-gather/scan", s.autoGatherScan)
+	protected.GET("/auto-gather/library", s.autoGatherLibrary)
+	protected.POST("/auto-gather/canonical-plan", s.autoGatherCanonicalPlan, s.requireCSRF)
+	protected.POST("/auto-gather/dry-run/start", s.autoGatherDryRunStart, s.requireCSRF)
+	protected.POST("/auto-gather/dry-run/stop", s.autoGatherDryRunStop, s.requireCSRF)
+	protected.GET("/auto-gather/dry-run/status", s.autoGatherDryRunStatus)
+	protected.POST("/auto-gather/real/prepare", s.autoGatherRealPrepare, s.requireCSRF)
+	protected.POST("/auto-gather/real/execute", s.autoGatherRealExecute, s.requireCSRF)
+	protected.POST("/auto-gather/real/cancel", s.autoGatherRealCancel, s.requireCSRF)
+	protected.POST("/auto-gather/real/stop", s.autoGatherRealStop, s.requireCSRF)
+	protected.GET("/auto-gather/real/status", s.autoGatherRealStatus)
+	protected.POST("/auto-gather/controlled/start", s.autoGatherControlledStart, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/stop", s.autoGatherControlledStop, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/reset", s.autoGatherControlledReset, s.requireCSRF)
+	protected.POST("/auto-gather/controlled/acknowledge", s.autoGatherControlledAcknowledge, s.requireCSRF)
+	protected.GET("/auto-gather/controlled/status", s.autoGatherControlledStatus)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -120,6 +139,7 @@ func (s *Server) Start() error {
 	protected.PUT("/config/verbosity", s.setVerbosity, s.requireCSRF)
 	protected.PUT("/config/refreshRate", s.setRefreshRate, s.requireCSRF)
 	protected.PUT("/config/logLines", s.setLogLines, s.requireCSRF)
+	protected.PUT("/config/tvLibraryPath", s.setTvLibraryPath, s.requireCSRF)
 
 	port := fmt.Sprintf(":%s", s.ctx.Port)
 	go func() {
@@ -144,6 +164,57 @@ func assetsHandler(content embed.FS) http.Handler {
 		panic(err)
 	}
 	return http.FileServer(http.FS(fsys))
+}
+
+func skipGzipForWebsocket(c echo.Context) bool {
+	if c.Request() == nil {
+		return false
+	}
+	if strings.EqualFold(c.Request().Header.Get("Upgrade"), "websocket") {
+		return true
+	}
+	path := c.Request().URL.Path
+	return path == "/ws" || strings.HasSuffix(path, "/ws")
+}
+
+func skipStaticForAPIAndWebsocket(c echo.Context) bool {
+	if c.Request() == nil {
+		return false
+	}
+	path := c.Request().URL.Path
+	if path == "/ws" || strings.HasPrefix(path, "/ws?") {
+		return true
+	}
+	return strings.HasPrefix(path, common.APIEndpoint)
+}
+
+func isSPAClientPath(p string) bool {
+	p = strings.TrimSpace(p)
+	if q := strings.IndexByte(p, '?'); q >= 0 {
+		p = p[:q]
+	}
+	p = strings.TrimSuffix(p, "/")
+	if p == "" {
+		p = "/"
+	}
+	switch p {
+	case "/", "/login", "/auto-gather", "/history", "/settings", "/logs", "/log", "/scatter", "/gather":
+		return true
+	}
+	return strings.HasPrefix(p, "/scatter/") ||
+		strings.HasPrefix(p, "/gather/") ||
+		strings.HasPrefix(p, "/settings/")
+}
+
+func websocketReadIsBenignClose(err error) bool {
+	if err == nil {
+		return true
+	}
+	return websocket.IsCloseError(err,
+		websocket.CloseNormalClosure,
+		websocket.CloseGoingAway,
+		websocket.CloseNoStatusReceived,
+	)
 }
 
 func (s *Server) wsHandler(c echo.Context) error {
@@ -172,7 +243,14 @@ func (s *Server) wsHandler(c echo.Context) error {
 	s.wsSession = sessionID
 	s.wsMu.Unlock()
 
-	return s.wsRead(conn, sessionID)
+	err = s.wsRead(conn, sessionID)
+	if err != nil && !websocketReadIsBenignClose(err) {
+		logger.Red("unable to read websocket message: %s", err)
+	}
+	// Upgrade hijacks the HTTP connection. Returning an error here would
+	// make Echo write an HTTP status/body onto that hijacked connection
+	// (WriteHeader/Write after a normal browser refresh close 1001).
+	return nil
 }
 
 func (s *Server) wsRead(conn *websocket.Conn, sessionID string) (err error) {
@@ -180,7 +258,6 @@ func (s *Server) wsRead(conn *websocket.Conn, sessionID string) (err error) {
 		var packet domain.Packet
 		err = conn.ReadJSON(&packet)
 		if err != nil {
-			logger.Red("unable to read websocket message: %s", err)
 			return err
 		}
 
@@ -283,6 +360,136 @@ func (s *Server) size(c echo.Context) error {
 
 func (s *Server) getLog(c echo.Context) error {
 	return c.JSON(200, s.core.GetLog())
+}
+
+func (s *Server) autoGatherScan(c echo.Context) error {
+	return c.JSON(200, s.core.ScanAutoGather())
+}
+
+func (s *Server) autoGatherLibrary(c echo.Context) error {
+	view, _ := s.core.GetAutoGatherLibrary()
+	return c.JSON(200, view)
+}
+
+func (s *Server) autoGatherCanonicalPlan(c echo.Context) error {
+	var req domain.AutoGatherCanonicalPlanRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid canonical plan request")
+	}
+	result := s.core.PlanAutoGatherCanonical(req)
+	if result.Error != "" {
+		// Validation / busy errors are client-visible; still HTTP 200 with Error
+		// field so the Auto Gather UI can render the message inline.
+		return c.JSON(200, result)
+	}
+	return c.JSON(200, result)
+}
+
+func (s *Server) autoGatherDryRunStart(c echo.Context) error {
+	state, err := s.core.StartAutoGatherDryRun()
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherDryRunStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherDryRun())
+}
+
+func (s *Server) autoGatherDryRunStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherDryRunState())
+}
+
+func (s *Server) autoGatherRealPrepare(c echo.Context) error {
+	var req domain.AutoGatherRealPrepareRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid real prepare request")
+	}
+	return c.JSON(200, s.core.PrepareAutoGatherReal(req))
+}
+
+func (s *Server) autoGatherRealExecute(c echo.Context) error {
+	var req domain.AutoGatherRealExecuteRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid real execute request")
+	}
+	state, err := s.core.ExecuteAutoGatherReal(req)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherRealStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherReal())
+}
+
+func (s *Server) autoGatherRealCancel(c echo.Context) error {
+	return c.JSON(200, s.core.CancelAutoGatherRealPrepare())
+}
+
+func (s *Server) autoGatherRealStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherRealState())
+}
+
+func (s *Server) autoGatherControlledStart(c echo.Context) error {
+	var req domain.AutoGatherControlledStartRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid controlled start request")
+	}
+	state, err := s.core.StartAutoGatherControlled(req)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherControlledStop(c echo.Context) error {
+	return c.JSON(200, s.core.StopAutoGatherControlled())
+}
+
+func (s *Server) autoGatherControlledReset(c echo.Context) error {
+	var req domain.AutoGatherControlledResetRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid controlled reset request")
+	}
+	state, err := s.core.ResetAutoGatherControlledSession(req.Confirm)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherControlledAcknowledge(c echo.Context) error {
+	var req domain.AutoGatherControlledAcknowledgeRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(400, "invalid acknowledge request")
+	}
+	state, err := s.core.AcknowledgeAutoGatherControlledInterrupted(req.Confirm)
+	if err != nil {
+		return c.JSON(409, state)
+	}
+	return c.JSON(200, state)
+}
+
+func (s *Server) autoGatherControlledStatus(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherControlledState())
+}
+
+func (s *Server) setTvLibraryPath(c echo.Context) error {
+	var value string
+	err := c.Bind(&value)
+	if err != nil {
+		return err
+	}
+
+	config, err := s.core.SetTvLibraryPath(value)
+	if err != nil {
+		return echo.NewHTTPError(400, err.Error())
+	}
+
+	return c.JSON(200, config)
 }
 
 func (s *Server) toggleDryRun(c echo.Context) error {

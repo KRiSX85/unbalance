@@ -25,6 +25,10 @@ func (c *Core) scatterPlanPrepare(setup domain.ScatterSetup) {
 		logger.Yellow("unbalanced is busy: %d", c.state.Status)
 		return
 	}
+	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() {
+		logger.Yellow("manual scatter blocked while Auto Gather is active")
+		return
+	}
 
 	c.state.Status = common.OpScatterPlan
 	c.state.Unraid = c.refreshUnraid()

@@ -6,6 +6,8 @@ export enum Op {
   ScatterValidate = 4,
   GatherPlan = 5,
   GatherMove = 6,
+  AutoGatherDryRun = 7,
+  AutoGatherReal = 8,
 }
 
 export type Step = 'idle' | 'select' | 'plan' | 'transfer';
@@ -24,8 +26,237 @@ export interface Config {
   refreshRate: number;
   logLines: number;
   speedWindow: string;
+  tvLibraryPath: string;
   authEnabled: boolean;
   authUsername: string;
+}
+
+export interface AutoGatherDiskPresence {
+  diskName: string;
+  videoCount: number;
+  videoBytes: number;
+  totalBytes: number;
+  emptyOnly: boolean;
+  sidecarOnly: boolean;
+}
+
+export interface AutoGatherShow {
+  name: string;
+  path: string;
+  status: string;
+  split: boolean;
+  ready: boolean;
+  totalVideoBytes: number;
+  totalBytes: number;
+  videoDisks: AutoGatherDiskPresence[];
+  sidecarOnlyDisks: AutoGatherDiskPresence[];
+  emptyOnlyDisks: AutoGatherDiskPresence[];
+  cachePoolsWithVideo: string[];
+
+  cleanupCandidateDisks?: string[];
+  cleanupCandidateCount?: number;
+
+  recommendedTargetDisk?: string;
+  moveRequiredBytes?: number;
+  projectedFreeBytes?: number;
+  projectedFreePercent?: number;
+  belowPreferredFreeFloor?: boolean;
+  minMovementAlternative?: AutoGatherTargetCandidate;
+  gatherTargets?: AutoGatherTargetCandidate[];
+  noEligibleReason?: string;
+}
+
+export interface AutoGatherTargetCandidate {
+  diskName: string;
+  eligible: boolean;
+  ineligibleReason?: string;
+  moveRequiredBytes: number;
+  currentShowBytesOnTarget: number;
+  freeBytes: number;
+  diskSizeBytes: number;
+  projectedFreeBytes: number;
+  projectedFreePercent: number;
+  meetsPreferredFreeFloor: boolean;
+}
+
+export interface AutoGatherScanResult {
+  libraryPath: string;
+  shows: AutoGatherShow[];
+  warnings?: string[];
+  error?: string;
+  cancelled?: boolean;
+  revision?: number;
+}
+
+export interface AutoGatherCanonicalTarget {
+  diskName: string;
+  diskPath: string;
+  isPhysicalArrayDisk: boolean;
+  canonicalEligible: boolean;
+  ineligibleReason?: string;
+  canonicalBytesToMove: number;
+  canonicalCurrentBytesOnTarget: number;
+  canonicalItemCount: number;
+  freeBytes: number;
+  diskSizeBytes: number;
+  projectedFreeBytes: number;
+  projectedFreePercent: number;
+  meetsPreferredFreeFloor: boolean;
+  rawGatherBinPresent: boolean;
+}
+
+export interface AutoGatherCanonicalPlanResult {
+  showPath: string;
+  stage2RecommendedTarget?: string;
+  stage2EstimatedMoveBytes?: number;
+  stage2TargetStillCanonicalEligible: boolean;
+  canonicalRecommendedTarget?: string;
+  canonicalMoveBytes?: number;
+  canonicalProjectedFreeBytes?: number;
+  canonicalProjectedFreePercent?: number;
+  belowPreferredFreeFloor?: boolean;
+  canonicalItemCountTotal?: number;
+  canonicalTargets?: AutoGatherCanonicalTarget[];
+  noEligibleReason?: string;
+  error?: string;
+  cancelled?: boolean;
+}
+
+export interface AutoGatherDryRunShowRecord {
+  showPath: string;
+  showName?: string;
+  targetDisk?: string;
+  moveBytes?: number;
+  belowPreferredFreeFloor?: boolean;
+  reason?: string;
+  at?: string;
+}
+
+export interface AutoGatherDryRunState {
+  phase: string;
+  dryRun: boolean;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  completed?: AutoGatherDryRunShowRecord[];
+  skipped?: AutoGatherDryRunShowRecord[];
+  failedShow?: string;
+  failedShowName?: string;
+  failureReason?: string;
+  startedAt?: string;
+  endedAt?: string;
+  iterationsConsidered?: number;
+  splitRemaining?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface AutoGatherRealPrepareResult {
+  preparationId: string;
+  showPath: string;
+  showName?: string;
+  sourceDisks?: string[];
+  canonicalTargetDisk?: string;
+  stage2RecommendedTarget?: string;
+  stage2AgreesWithCanonical: boolean;
+  currentBytesOnTarget?: number;
+  estimatedMoveBytes?: number;
+  targetFreeBytes?: number;
+  projectedTargetFreeBytes?: number;
+  executable: boolean;
+  issues?: string[];
+  permissionWarnings?: AutoGatherRealPermissionWarnings;
+  emptyFolderOnlyDisks?: string[];
+  expiresAt?: string;
+  globalDryRun: boolean;
+  error?: string;
+}
+
+export interface AutoGatherRealPermissionWarnings {
+  ownerIssues?: number;
+  groupIssues?: number;
+  folderIssues?: number;
+  fileIssues?: number;
+}
+
+export interface AutoGatherRealVerification {
+  passed: boolean;
+  targetDisk?: string;
+  substantiveDisks?: string[];
+  emptyFolderRemnants?: string[];
+  message?: string;
+}
+
+export interface AutoGatherRealState {
+  phase: string;
+  globalDryRun: boolean;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  operationPhase?: string;
+  preparationId?: string;
+  prepared?: AutoGatherRealPrepareResult;
+  verification?: AutoGatherRealVerification;
+  startedAt?: string;
+  endedAt?: string;
+  error?: string;
+  message?: string;
+  stoppedMessage?: string;
+}
+
+export interface AutoGatherControlledShowRecord {
+  showPath: string;
+  showName?: string;
+  targetDisk?: string;
+  moveBytes?: number;
+  permissionWarnings?: AutoGatherRealPermissionWarnings;
+  reason?: string;
+  at?: string;
+}
+
+export interface AutoGatherControlledRsyncProbe {
+  pid?: number;
+  alive?: boolean;
+  plausibleRsync?: boolean;
+  command?: string;
+  note?: string;
+}
+
+export interface AutoGatherControlledState {
+  phase: string;
+  globalDryRun: boolean;
+  maxShows: number;
+  maxBytes: number;
+  currentShow?: string;
+  currentShowName?: string;
+  currentTarget?: string;
+  operationPhase?: string;
+  completed?: AutoGatherControlledShowRecord[];
+  skipped?: AutoGatherControlledShowRecord[];
+  cumulativeBytes?: number;
+  failedShow?: string;
+  failedShowName?: string;
+  failureReason?: string;
+  startedAt?: string;
+  endedAt?: string;
+  message?: string;
+  error?: string;
+  sessionId?: string;
+  lastRsyncPid?: number;
+  lastSourceEntry?: string;
+  rsyncProbe?: AutoGatherControlledRsyncProbe;
+  requiresAcknowledgement?: boolean;
+  canAcknowledge?: boolean;
+  libraryRevision?: number;
+  librarySummary?: AutoGatherLibrarySummary;
+}
+
+export interface AutoGatherLibrarySummary {
+  revision: number;
+  libraryPath?: string;
+  showCount: number;
+  splitCount: number;
+  recommendationCount: number;
 }
 
 export interface AuthStatus {

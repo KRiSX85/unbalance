@@ -3,7 +3,6 @@ package core
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sync"
 	"time"
@@ -20,7 +19,6 @@ const (
 	certDir    = "/boot/config/ssl/certs"
 	mailCmd    = "/usr/local/emhttp/webGui/scripts/notify"
 	timeFormat = "Jan _2, 2006 15:04:05"
-	settings   = "/boot/config/plugins/unbalanced"
 )
 
 var (
@@ -67,6 +65,24 @@ type Core struct {
 	pendingPlansMu sync.Mutex
 
 	stopped bool
+
+	autoGatherMu            sync.RWMutex
+	autoGatherRun           *domain.AutoGatherDryRunState
+	autoGatherStopRequested bool
+	autoGatherDryRunExec    bool // forces --dry-run on Gather operations during Stage 3B
+
+	autoGatherRealPrepared      *domain.AutoGatherRealPreparedMove
+	autoGatherRealState         *domain.AutoGatherRealState
+	autoGatherRealStopRequested bool
+	autoGatherRealExec          bool // Stage 3C real Gather execution in progress
+
+	autoGatherControlledRun           *domain.AutoGatherControlledState
+	autoGatherControlledStopRequested bool
+	autoGatherControlledShutdown      bool
+
+	autoGatherLibraryRevision uint64
+	autoGatherLibraryScan     *domain.AutoGatherScanResult
+	autoGatherLibrarySummary  domain.AutoGatherLibrarySummary
 }
 
 func Create(ctx *domain.Context) *Core {
@@ -119,12 +135,15 @@ func (c *Core) Start() error {
 
 	c.sid = sid
 
+	c.RecoverAutoGatherControlledInterrupted()
+
 	go c.mailboxHandler()
 
 	return nil
 }
 
 func (c *Core) Stop() error {
+	c.persistAutoGatherControlledForShutdown()
 	return nil
 }
 
@@ -132,7 +151,7 @@ func (c *Core) mailboxHandler() {
 	for p := range c.mailbox {
 		packet := p.(domain.Packet)
 
-		if c.state.Status != common.OpNeutral && packet.Topic != common.CommandStop {
+		if !c.mailboxAllows(packet.Topic) {
 			logger.Yellow("unbalance is busy: %d", c.state.Status)
 			continue
 		}
@@ -211,8 +230,44 @@ func (c *Core) mailboxHandler() {
 
 		case common.CommandStop:
 			c.stopped = true
-
+			c.requestAutoGatherDryRunStop()
+			c.requestAutoGatherRealStop()
 		}
+	}
+}
+
+// mailboxAllows gates manual Gather/Scatter commands while Stage 3B/3C/3D
+// execution is active, or while a previous Stage 3D session was interrupted
+// and has not been acknowledged. Stop remains available during Auto Gather
+// dry-run/real and in-flight Gather moves.
+func (c *Core) mailboxAllows(topic string) bool {
+	if topic == common.CommandStop {
+		return c.state.Status == common.OpGatherMove ||
+			c.state.Status == common.OpAutoGatherDryRun ||
+			c.state.Status == common.OpAutoGatherReal ||
+			c.isAutoGatherDryRunActive() ||
+			c.isAutoGatherRealExecutionBusy()
+	}
+	if c.isAutoGatherDryRunActive() || c.isAutoGatherRealExecutionBusy() || c.autoGatherControlledBlocksRealOps() {
+		return false
+	}
+	if c.state.Status == common.OpNeutral {
+		return true
+	}
+	return false
+}
+
+func (c *Core) isAutoGatherDryRunActive() bool {
+	c.autoGatherMu.RLock()
+	defer c.autoGatherMu.RUnlock()
+	if c.autoGatherRun == nil {
+		return false
+	}
+	switch c.autoGatherRun.Phase {
+	case domain.AutoGatherDryRunPhaseRunning, domain.AutoGatherDryRunPhaseStopping:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -331,15 +386,14 @@ func (c *Core) SetAuth(passwordHash string) error {
 }
 
 func (c *Core) saveSettings() error {
-	location := filepath.Join(settings, "unbalanced.env")
-	return lib.SaveEnv(location, c.ctx.Config)
+	return lib.SaveEnv(c.ctx.Paths.EnvFile, c.ctx.Config)
 }
 
 // HISTORY HANDLERS
 func (c *Core) historyRead() (*domain.History, error) {
 	var history domain.History
 
-	fileName := filepath.Join(common.PluginLocation, common.HistoryFilename)
+	fileName := c.ctx.Paths.HistoryFile
 
 	file, err := os.Open(fileName)
 	if err != nil {
@@ -369,7 +423,7 @@ func (c *Core) historyRead() (*domain.History, error) {
 }
 
 func (c *Core) historyWrite(history *domain.History) error {
-	tmpName := filepath.Join(common.PluginLocation, common.HistoryFilename+"."+shortid.MustGenerate())
+	tmpName := c.ctx.Paths.HistoryFile + "." + shortid.MustGenerate()
 
 	file, err := os.Create(tmpName)
 	if err != nil {
@@ -383,10 +437,14 @@ func (c *Core) historyWrite(history *domain.History) error {
 		return err
 	}
 
-	return os.Rename(tmpName, filepath.Join(common.PluginLocation, common.HistoryFilename))
+	return os.Rename(tmpName, c.ctx.Paths.HistoryFile)
 }
 
 func (c *Core) updateHistory(history *domain.History, operation *domain.Operation) {
+	// Stage 3B dry-run orchestration must not churn normal Gather/Scatter history.
+	if c.autoGatherDryRunExec {
+		return
+	}
 	count := len(history.Order)
 	if count == common.HistoryCapacity {
 		delete(history.Items, history.Order[count-1])

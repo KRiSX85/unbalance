@@ -40,6 +40,7 @@ func (o *Orchestrator) Run() error {
 	w := make(chan os.Signal, 1)
 	signal.Notify(w, syscall.SIGTERM, syscall.SIGINT)
 	logger.Blue("received %s signal. shutting down the app ...", <-w)
+	_ = core.Stop()
 
 	return nil
 }

@@ -15,7 +15,14 @@ import {
   State,
   Command,
 } from '~/types';
-import { getRouteFromStatus } from '~/helpers/routes';
+import {
+  isAutoGatherDryRunActivePhase,
+  isAutoGatherRealActivePhase,
+  isAutoGatherControlledActivePhase,
+  isAutoGatherControlledInterruptedPhase,
+  routeForLoadedState,
+  shouldFollowTransferEndedNavigation,
+} from '~/helpers/auto-gather-ui';
 import { useScatterStore } from '~/state/scatter';
 import { useGatherStore } from '~/state/gather';
 import { createMachine, StateMachine } from '~/helpers/sm';
@@ -33,6 +40,7 @@ interface UnraidStore {
   plan: Plan | null;
   logs: Array<string>;
   error: string;
+  autoGatherUiActive: boolean;
   actions: {
     connectSocket: () => void;
     disconnectSocket: () => void;
@@ -63,6 +71,8 @@ interface UnraidStore {
     resetPlan: () => void;
     stop: () => void;
     operationError: (payload: string) => void;
+    syncAutoGatherDryRun: (active: boolean) => void;
+    syncAutoGatherReal: (active: boolean) => void;
   };
 }
 
@@ -194,6 +204,7 @@ export const useUnraidStore = create<UnraidStore>()(
       plan: null,
       logs: [],
       error: '',
+      autoGatherUiActive: false,
       actions: {
         connectSocket: () => {
           const current = get().socket;
@@ -256,18 +267,56 @@ export const useUnraidStore = create<UnraidStore>()(
         },
         getUnraid: async () => {
           const array = await Api.getUnraid();
+          let dryRunPhase: string | undefined;
+          let realPhase: string | undefined;
+          let controlledPhase: string | undefined;
+          try {
+            const dryRun = await Api.getAutoGatherDryRunStatus();
+            dryRunPhase = dryRun.phase;
+          } catch {
+            dryRunPhase = undefined;
+          }
+          try {
+            const real = await Api.getAutoGatherRealStatus();
+            realPhase = real.phase;
+          } catch {
+            realPhase = undefined;
+          }
+          try {
+            const controlled = await Api.getAutoGatherControlledStatus();
+            controlledPhase = controlled.phase;
+          } catch {
+            controlledPhase = undefined;
+          }
 
           console.log('useUnraidStore.getUnraid() ', array);
 
-          const route = getRouteFromStatus(array.status);
+          const dryRunActive = isAutoGatherDryRunActivePhase(dryRunPhase);
+          const realActive = isAutoGatherRealActivePhase(realPhase);
+          const controlledActive =
+            isAutoGatherControlledActivePhase(controlledPhase) ||
+            isAutoGatherControlledInterruptedPhase(controlledPhase);
+          const autoGatherActive = dryRunActive || realActive || controlledActive;
+          const pathname =
+            typeof window !== 'undefined' ? window.location.pathname : '';
+          const route = routeForLoadedState(array.status, dryRunPhase, realPhase, {
+            pathname,
+            controlledPhase,
+          });
+          const status = autoGatherActive
+            ? realActive || controlledActive
+              ? Op.AutoGatherReal
+              : Op.AutoGatherDryRun
+            : array.status;
 
           set((state) => {
             state.loaded = true;
-            state.status = array.status;
+            state.status = status;
             state.unraid = array.unraid;
-            state.operation = array.operation;
+            state.operation = autoGatherActive ? null : array.operation;
             state.history = array.history;
             state.route = route;
+            state.autoGatherUiActive = autoGatherActive;
           });
 
           console.log('navigating to ', route);
@@ -331,8 +380,14 @@ export const useUnraidStore = create<UnraidStore>()(
         scatterPlanEnded: (payload: Plan) => {
           console.log('scatterPlanEnded ', payload);
           set((state) => {
-            state.status = Op.Neutral;
-            state.plan = payload;
+            if (
+              !state.autoGatherUiActive &&
+              state.status !== Op.AutoGatherDryRun &&
+              state.status !== Op.AutoGatherReal
+            ) {
+              state.status = Op.Neutral;
+              state.plan = payload;
+            }
             state.error = '';
           });
           // get().actions.getUnraid();
@@ -398,14 +453,33 @@ export const useUnraidStore = create<UnraidStore>()(
           get().navigate?.('/scatter/transfer/operation');
         },
         transferProgress: (payload: Operation) => {
-          // console.log('transferProgress ', payload);
+          if (
+            get().autoGatherUiActive ||
+            get().status === Op.AutoGatherDryRun ||
+            get().status === Op.AutoGatherReal
+          ) {
+            return;
+          }
           set((state) => {
             state.operation = payload;
           });
         },
         transferEnded: (payload: State) => {
-          // console.log('transferProgress ', payload);
+          const stayOnAutoGather =
+            get().autoGatherUiActive ||
+            !shouldFollowTransferEndedNavigation(
+              get().status,
+              undefined,
+            );
+
           set((state) => {
+            if (stayOnAutoGather) {
+              state.status = Op.AutoGatherDryRun;
+              state.operation = null;
+              state.plan = null;
+              state.error = '';
+              return;
+            }
             state.status = payload.status;
             state.unraid = payload.unraid;
             state.operation = payload.operation;
@@ -414,7 +488,9 @@ export const useUnraidStore = create<UnraidStore>()(
             state.error = '';
           });
 
-          get().navigate?.('/history');
+          if (!stayOnAutoGather) {
+            get().navigate?.('/history');
+          }
         },
         gatherPlan: () => {
           console.log('running gather plan');
@@ -442,8 +518,13 @@ export const useUnraidStore = create<UnraidStore>()(
           );
         },
         gatherProgress: (payload: string) => {
-          // console.log('scatterProgress ', payload);
-          // useGatherStore.getState().actions.addLine(payload);
+          if (
+            get().autoGatherUiActive ||
+            get().status === Op.AutoGatherDryRun ||
+            get().status === Op.AutoGatherReal
+          ) {
+            return;
+          }
           set((state) => {
             state.logs.push(payload);
           });
@@ -451,8 +532,14 @@ export const useUnraidStore = create<UnraidStore>()(
         gatherPlanEnded: (payload: Plan) => {
           console.log('gatherPlanEnded ', payload);
           set((state) => {
-            state.status = Op.Neutral;
-            state.plan = payload;
+            if (
+              !state.autoGatherUiActive &&
+              state.status !== Op.AutoGatherDryRun &&
+              state.status !== Op.AutoGatherReal
+            ) {
+              state.status = Op.Neutral;
+              state.plan = payload;
+            }
             state.error = '';
           });
           // get().actions.getUnraid();
@@ -580,6 +667,32 @@ export const useUnraidStore = create<UnraidStore>()(
         operationError: (payload: string) => {
           set((state) => {
             state.error = payload;
+          });
+        },
+        syncAutoGatherDryRun: (active: boolean) => {
+          set((state) => {
+            if (active) {
+              state.autoGatherUiActive = true;
+              state.status = Op.AutoGatherDryRun;
+              return;
+            }
+            if (state.status === Op.AutoGatherDryRun) {
+              state.autoGatherUiActive = false;
+              state.status = Op.Neutral;
+            }
+          });
+        },
+        syncAutoGatherReal: (active: boolean) => {
+          set((state) => {
+            if (active) {
+              state.autoGatherUiActive = true;
+              state.status = Op.AutoGatherReal;
+              return;
+            }
+            if (state.status === Op.AutoGatherReal) {
+              state.autoGatherUiActive = false;
+              state.status = Op.Neutral;
+            }
           });
         },
       },

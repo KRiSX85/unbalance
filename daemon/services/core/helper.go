@@ -139,13 +139,28 @@ func getItems(blockSize uint64, re *regexp.Regexp, src, folder string) ([]*domai
 }
 
 func (c *Core) getItemsAndIssues(status, blockSize uint64, reItems, reStat *regexp.Regexp, disks []*domain.Disk, folders []string) ([]*domain.Item, int64, int64, int64, int64) {
+	items, ownerIssue, groupIssue, folderIssue, fileIssue, _ := c.getItemsAndIssuesCancellable(status, blockSize, reItems, reStat, disks, folders, nil)
+	return items, ownerIssue, groupIssue, folderIssue, fileIssue
+}
+
+// getItemsAndIssuesCancellable is the shared Gather discovery loop with an
+// optional Stage-3B-only cancellation callback. shouldStop nil preserves the
+// historical manual Gather/Scatter semantics exactly.
+func (c *Core) getItemsAndIssuesCancellable(status, blockSize uint64, reItems, reStat *regexp.Regexp, disks []*domain.Disk, folders []string, shouldStop func() bool) ([]*domain.Item, int64, int64, int64, int64, bool) {
 	var ownerIssue, groupIssue, folderIssue, fileIssue int64
 	items := make([]*domain.Item, 0)
 
 	// Get owner/permission issues
 	// Get items to be transferred
 	for _, disk := range disks {
+		if shouldStop != nil && shouldStop() {
+			return items, ownerIssue, groupIssue, folderIssue, fileIssue, true
+		}
 		for _, path := range folders {
+			if shouldStop != nil && shouldStop() {
+				return items, ownerIssue, groupIssue, folderIssue, fileIssue, true
+			}
+
 			// logging
 			logger.Blue("scanning:disk(%s):folder(%s)", disk.Path, path)
 
@@ -182,7 +197,7 @@ func (c *Core) getItemsAndIssues(status, blockSize uint64, reItems, reStat *rege
 		}
 	}
 
-	return items, ownerIssue, groupIssue, folderIssue, fileIssue
+	return items, ownerIssue, groupIssue, folderIssue, fileIssue, false
 }
 
 func (c *Core) sendTimeFeedbackToFrontend(topic, fended string, elapsed time.Duration) {
@@ -212,9 +227,9 @@ func (c *Core) sendMailFeedback(fstarted, ffinished string, elapsed time.Duratio
 			\n%d file(s)/folder(s) with a group other than 'users'
 			\n%d folder(s) with a permission other than 'drwxrwxrwx'
 			\n%d files(s) with a permission other than '-rw-rw-rw-' or '-r--r--r--'
-			\n\nCheck the log file (/var/log/unbalanced.log) for additional information
+			\n\nCheck the log file (%s) for additional information
 			\n\nIt's strongly suggested to install the Fix Common Plugins and run the Docker Safe New Permissions command
-		`, plan.OwnerIssue, plan.GroupIssue, plan.FolderIssue, plan.FileIssue)
+		`, plan.OwnerIssue, plan.GroupIssue, plan.FolderIssue, plan.FileIssue, c.ctx.Paths.LogFile)
 	}
 
 	if sendErr := sendmail(c.ctx.Config.NotifyPlan, subject, message, false); sendErr != nil {

@@ -57,6 +57,17 @@ export const Header: React.FunctionComponent = () => {
           </StatefulLink>
 
           <StatefulLink
+            to="/auto-gather"
+            className={({ isActive }) => {
+              return isActive
+                ? 'ml-4 underline underline-offset-8 font-medium dark:text-white text-sky-900'
+                : 'ml-4';
+            }}
+          >
+            AUTO GATHER
+          </StatefulLink>
+
+          <StatefulLink
             to="/history"
             className={({ isActive }) => {
               return isActive

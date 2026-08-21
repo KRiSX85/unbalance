@@ -2,27 +2,27 @@ package main
 
 import (
 	"log"
-	"path/filepath"
+	"os"
 
 	"github.com/alecthomas/kong"
 	"github.com/cskr/pubsub"
 	"gopkg.in/natefinch/lumberjack.v2"
 
 	"unbalance/daemon/cmd"
-	"unbalance/daemon/common"
 	"unbalance/daemon/domain"
 	"unbalance/daemon/lib"
 )
 
 var Version string
 
-// const ReservedSpace int64 = 512 * 1024 * 1024 // 512Mb
-
 var cli struct {
-	Port    string `default:"7090" help:"port to listen on"`
-	LogsDir string `default:"/var/log" help:"directory to store logs"`
+	Port    string `name:"port" default:"7090" help:"port to listen on"`
+	LogsDir string `name:"logs-dir" env:"UNBALANCED_LOGS_DIR" default:"/var/log" help:"directory to store logs"`
+	DataDir string `name:"data-dir" env:"UNBALANCED_DATA_DIR" default:"" help:"directory for mutable state (env, history, sessions); defaults to the official plugin path"`
 
-	// Config vars
+	// Config vars. Kong may initialize these from process environment or
+	// defaults (DRY_RUN defaults to true). After path resolution, data-dir
+	// unbalanced.env overlays present keys and is the runtime source of truth.
 	DryRun         bool     `env:"DRY_RUN" default:"true" help:"perform a dry-run rather than actual work"`
 	NotifyPlan     int      `env:"NOTIFY_PLAN" default:"0" help:"notify via email after plan operation has completed (unraid notifications must be set up first): 0 - No notifications; 1 - Simple notifications; 2 - Detailed notifications"`
 	NotifyTransfer int      `env:"NOTIFY_TRANSFER" default:"0" help:"notify via email after transfer operation has completed (unraid notifications must be set up first): 0 - No notifications; 1 - Simple notifications; 2 - Detailed notifications"`
@@ -33,6 +33,7 @@ var cli struct {
 	RefreshRate    int      `env:"REFRESH_RATE" default:"1000" help:"how often to refresh the ui while running a command (in milliseconds)"`
 	LogLines       int      `env:"LOG_LINES" default:"100" help:"number of log lines shown in the web ui logs page"`
 	SpeedWindow    string   `env:"SPEED_WINDOW" default:"90s" help:"time window used to calculate recent transfer speed"`
+	TvLibraryPath  string   `env:"TV_LIBRARY_PATH" default:"data/media/tv" help:"TV library path relative to /mnt/user used by Auto Gather"`
 	AuthEnabled    bool     `env:"AUTH_ENABLED" default:"false" help:"require login before using the web ui"`
 	AuthUsername   string   `env:"AUTH_USERNAME" default:"admin" help:"admin username used to log into the web ui"`
 	AuthPassword   string   `env:"AUTH_PASSWORD_HASH" default:"" help:"stored admin password hash (Argon2id for new passwords; bcrypt remains supported for migration)"`
@@ -41,53 +42,91 @@ var cli struct {
 }
 
 func main() {
-	// Users can set some value that falls below ReservedSpace, but during planning we force ReservedSpace if
-	// reservation is less than that
-	// Also, if they enter some unrecognized unit, we will used ReservedSpace (in planning as well)
-	// ctx := kong.Parse(&cli, kong.Vars{
-	// 	"reserved_amount": strconv.FormatUint(common.ReservedSpace/1024/1024, 10),
-	// })
-	ctx := kong.Parse(&cli)
+	kctx := kong.Parse(&cli)
 
-	log.SetOutput(&lumberjack.Logger{
-		Filename:   filepath.Join(cli.LogsDir, "unbalanced.log"),
-		MaxSize:    10, // megabytes
-		MaxBackups: 10,
-		MaxAge:     28, //days
-		// Compress:   true, // disabled by default
-	})
-
-	// Read AUTH_PASSWORD_HASH directly from disk to sidestep bash's mangling
-	// of $-characters in password hashes when the start script sources the
-	// env file. Kong's env-driven value is intentionally overridden.
-	envPath := filepath.Join(common.PluginLocation, "unbalanced.env")
-	if hash, err := lib.LoadAuthHash(envPath); err != nil {
-		log.Printf("warning: unable to read auth hash from %s: %s", envPath, err)
-	} else {
-		cli.AuthPassword = hash
+	paths, err := domain.ResolveRuntimePaths(
+		cli.DataDir,
+		cli.LogsDir,
+		domain.ResolveRuntimeOptions{
+			EmptyDataDirExplicit: domain.EmptyDataDirExplicit(os.Args, os.Environ()),
+			EmptyLogsDirExplicit: domain.EmptyLogsDirExplicit(os.Args, os.Environ()),
+			CustomLogsDir:        domain.LogsDirProvided(os.Args, os.Environ()),
+		},
+	)
+	if err != nil {
+		log.Fatalf("runtime paths: %s", err)
 	}
 
-	log.Printf("cli: %+v", cli)
+	if err := domain.EnsureRuntimeDirs(paths); err != nil {
+		log.Fatalf("runtime directories: %s", err)
+	}
 
-	err := ctx.Run(&domain.Context{
-		Port: cli.Port,
-		Config: domain.Config{
-			Version:        Version,
-			DryRun:         cli.DryRun,
-			NotifyPlan:     cli.NotifyPlan,
-			NotifyTransfer: cli.NotifyTransfer,
-			ReservedAmount: cli.ReservedAmount,
-			ReservedUnit:   cli.ReservedUnit,
-			RsyncArgs:      cli.RsyncArgs,
-			Verbosity:      cli.Verbosity,
-			RefreshRate:    cli.RefreshRate,
-			LogLines:       cli.LogLines,
-			SpeedWindow:    cli.SpeedWindow,
-			AuthEnabled:    cli.AuthEnabled,
-			AuthUsername:   cli.AuthUsername,
-			AuthPassword:   cli.AuthPassword,
-		},
-		Hub: pubsub.New(23),
+	log.SetOutput(&lumberjack.Logger{
+		Filename:   paths.LogFile,
+		MaxSize:    10, // megabytes
+		MaxBackups: 10,
+		MaxAge:     28, // days
 	})
-	ctx.FatalIfErrorf(err)
+
+	// Read AUTH_PASSWORD_HASH from the resolved env file to sidestep bash's
+	// mangling of $-characters when the start script sources the env file.
+	if _, statErr := os.Stat(paths.EnvFile); statErr == nil {
+		if hash, err := lib.LoadAuthHash(paths.EnvFile); err != nil {
+			log.Printf("warning: unable to read auth hash from %s: %s", paths.EnvFile, err)
+		} else {
+			cli.AuthPassword = hash
+		}
+	} else if !os.IsNotExist(statErr) {
+		log.Printf("warning: unable to stat env file %s: %s", paths.EnvFile, statErr)
+	}
+
+	config := domain.Config{
+		Version:        Version,
+		DryRun:         cli.DryRun,
+		NotifyPlan:     cli.NotifyPlan,
+		NotifyTransfer: cli.NotifyTransfer,
+		ReservedAmount: cli.ReservedAmount,
+		ReservedUnit:   cli.ReservedUnit,
+		RsyncArgs:      cli.RsyncArgs,
+		Verbosity:      cli.Verbosity,
+		RefreshRate:    cli.RefreshRate,
+		LogLines:       cli.LogLines,
+		SpeedWindow:    cli.SpeedWindow,
+		TvLibraryPath:  cli.TvLibraryPath,
+		AuthEnabled:    cli.AuthEnabled,
+		AuthUsername:   cli.AuthUsername,
+		AuthPassword:   cli.AuthPassword,
+	}
+	if err := lib.ApplyPersistedEnv(paths.EnvFile, &config); err != nil {
+		log.Printf("warning: unable to load env file %s: %s", paths.EnvFile, err)
+	} else {
+		cli.DryRun = config.DryRun
+		cli.TvLibraryPath = config.TvLibraryPath
+		cli.AuthPassword = config.AuthPassword
+	}
+
+	dataDirLog := cli.DataDir
+	if dataDirLog == "" {
+		dataDirLog = "(default)"
+	}
+	log.Printf("cli: port=%s logsDir=%s dataDir=%s dryRun=%v authEnabled=%v authUsername=%s tvLibraryPath=%s",
+		cli.Port, cli.LogsDir, dataDirLog, cli.DryRun, cli.AuthEnabled, cli.AuthUsername, cli.TvLibraryPath)
+	log.Printf("runtime: port=%s dataDir=%s envFile=%s historyFile=%s sessionsFile=%s logFile=%s",
+		cli.Port,
+		paths.DataDir,
+		paths.EnvFile,
+		paths.HistoryFile,
+		paths.SessionsFile,
+		paths.LogFile,
+	)
+
+	err = kctx.Run(&domain.Context{
+		Port:    cli.Port,
+		LogsDir: paths.LogsDir,
+		DataDir: paths.DataDir,
+		Paths:   paths,
+		Config:  config,
+		Hub:     pubsub.New(23),
+	})
+	kctx.FatalIfErrorf(err)
 }

@@ -12,6 +12,7 @@ type Config struct {
 	RefreshRate    int      `json:"refreshRate"`
 	LogLines       int      `json:"logLines"`
 	SpeedWindow    string   `json:"speedWindow"`
+	TvLibraryPath  string   `json:"tvLibraryPath"`
 	AuthEnabled    bool     `json:"authEnabled"`
 	AuthUsername   string   `json:"authUsername"`
 	AuthPassword   string   `json:"-"`

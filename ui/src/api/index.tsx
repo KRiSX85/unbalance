@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -35,6 +35,7 @@ export class Api {
         refreshRate: 0,
         logLines: 100,
         speedWindow: '90s',
+        tvLibraryPath: 'data/media/tv',
         authEnabled: false,
         authUsername: 'admin',
       };
@@ -147,6 +148,239 @@ export class Api {
     } catch (e) {
       return null;
     }
+  }
+
+  static async scanAutoGather(): Promise<AutoGatherScanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/scan`);
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async planAutoGatherCanonical(payload: {
+    showPath: string;
+    stage2RecommendedTarget?: string;
+    stage2EstimatedMoveBytes?: number;
+  }): Promise<AutoGatherCanonicalPlanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/canonical-plan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async startAutoGatherDryRun(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => null);
+      throw new Error(payload?.error || (await response.text()));
+    }
+    return response.json();
+  }
+
+  static async stopAutoGatherDryRun(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherDryRunStatus(): Promise<AutoGatherDryRunState> {
+    const response = await fetch(`${Api.host}/auto-gather/dry-run/status`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async prepareAutoGatherReal(payload: {
+    showPath: string;
+    stage2RecommendedTarget?: string;
+    stage2EstimatedMoveBytes?: number;
+  }): Promise<AutoGatherRealPrepareResult> {
+    const response = await fetch(`${Api.host}/auto-gather/real/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async executeAutoGatherReal(payload: {
+    preparationId: string;
+    showPath: string;
+    confirm: boolean;
+  }): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to execute real Auto Gather move');
+    }
+    return body;
+  }
+
+  static async cancelAutoGatherRealPrepare(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async stopAutoGatherReal(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherRealStatus(): Promise<AutoGatherRealState> {
+    const response = await fetch(`${Api.host}/auto-gather/real/status`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async startAutoGatherControlled(payload: {
+    confirm: boolean;
+    maxShows: number;
+    maxBytes: number;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to start controlled Auto Gather');
+    }
+    return body;
+  }
+
+  static async stopAutoGatherControlled(): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async resetAutoGatherControlled(payload: {
+    confirm: boolean;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to clear finished Auto Gather session');
+    }
+    return body;
+  }
+
+  static async acknowledgeAutoGatherControlled(payload: {
+    confirm: boolean;
+  }): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/acknowledge`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    const body = await response.json();
+    if (!response.ok) {
+      throw new Error(body?.error || 'Unable to acknowledge interrupted Auto Gather');
+    }
+    return body;
+  }
+
+  static async getAutoGatherControlledStatus(): Promise<AutoGatherControlledState> {
+    const response = await fetch(`${Api.host}/auto-gather/controlled/status`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherLibrary(): Promise<AutoGatherScanResult> {
+    const response = await fetch(`${Api.host}/auto-gather/library`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async setTvLibraryPath(path: string): Promise<string> {
+    const options = {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      body: JSON.stringify(path),
+    };
+    const response = await fetch(`${Api.host}/config/tvLibraryPath`, options);
+    if (!response.ok) {
+      let message = response.statusText;
+      try {
+        const payload = await response.json();
+        message = payload?.message || payload || message;
+      } catch {
+        const text = await response.text();
+        if (text) message = text;
+      }
+      throw new Error(typeof message === 'string' ? message : 'Invalid TV library path');
+    }
+    const config = await response.json();
+    return config.tvLibraryPath || path;
   }
 
   static async getLog(): Promise<Array<string>> {

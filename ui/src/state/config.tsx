@@ -16,6 +16,7 @@ interface ConfigStore {
   refreshRate: number;
   logLines: number;
   speedWindow: string;
+  tvLibraryPath: string;
   actions: {
     getConfig: () => Promise<void>;
     toggleDryRun: () => Promise<void>;
@@ -27,6 +28,7 @@ interface ConfigStore {
     setVerbosity: (value: number) => Promise<void>;
     setRefreshRate: (value: number) => Promise<void>;
     setLogLines: (value: number) => Promise<void>;
+    setTvLibraryPath: (path: string) => Promise<string>;
   };
 }
 
@@ -43,6 +45,7 @@ export const useConfigStore = create<ConfigStore>()(
     refreshRate: 1000,
     logLines: 100,
     speedWindow: '90s',
+    tvLibraryPath: 'data/media/tv',
     actions: {
       getConfig: async () => {
         const config = await Api.getConfig();
@@ -59,6 +62,7 @@ export const useConfigStore = create<ConfigStore>()(
           state.refreshRate = config.refreshRate;
           state.logLines = config.logLines;
           state.speedWindow = config.speedWindow;
+          state.tvLibraryPath = config.tvLibraryPath || 'data/media/tv';
         });
       },
       toggleDryRun: async () => {
@@ -116,6 +120,13 @@ export const useConfigStore = create<ConfigStore>()(
         });
         await Api.setLogLines(value);
       },
+      setTvLibraryPath: async (path: string) => {
+        const normalized = await Api.setTvLibraryPath(path);
+        set((state) => {
+          state.tvLibraryPath = normalized;
+        });
+        return normalized;
+      },
     },
   })),
 );
@@ -143,3 +154,5 @@ export const useConfigRefreshRate = () =>
   useConfigStore((state) => state.refreshRate);
 export const useConfigLogLines = () =>
   useConfigStore((state) => state.logLines);
+export const useConfigTvLibraryPath = () =>
+  useConfigStore((state) => state.tvLibraryPath);

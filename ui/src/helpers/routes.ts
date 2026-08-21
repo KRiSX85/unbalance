@@ -14,6 +14,9 @@ export function getRouteFromStatus(status: Op): string {
       return '/scatter/transfer/operation';
     case Op.GatherMove:
       return '/gather/transfer/operation';
+    case Op.AutoGatherDryRun:
+    case Op.AutoGatherReal:
+      return '/auto-gather';
     default:
       return '/scatter/select';
   }
@@ -74,3 +77,47 @@ export const getBaseRoute = (path: string) => {
   const firstLevel = parts.find((part) => part !== '');
   return '/' + firstLevel;
 };
+
+export function canonicalAppPath(pathname?: string | null): string | null {
+  if (!pathname) {
+    return null;
+  }
+  const path = pathname.split('?')[0].replace(/\/+$/, '') || '/';
+  if (path === '/log' || path.startsWith('/log/')) {
+    return '/logs';
+  }
+  if (path === '/logs' || path.startsWith('/logs/')) {
+    return '/logs';
+  }
+  if (path === '/auto-gather' || path.startsWith('/auto-gather/')) {
+    return '/auto-gather';
+  }
+  if (path === '/history' || path.startsWith('/history/')) {
+    return '/history';
+  }
+  if (path === '/settings') {
+    return '/settings';
+  }
+  if (path.startsWith('/settings/')) {
+    return path;
+  }
+  if (path === '/scatter') {
+    return '/scatter/select';
+  }
+  if (path.startsWith('/scatter/')) {
+    return path;
+  }
+  if (path === '/gather') {
+    return '/gather/select';
+  }
+  if (path.startsWith('/gather/')) {
+    return path;
+  }
+  if (path === '/login') {
+    return '/login';
+  }
+  if (path === '/') {
+    return '/scatter/select';
+  }
+  return null;
+}

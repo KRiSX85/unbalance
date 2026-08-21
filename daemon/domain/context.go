@@ -5,6 +5,9 @@ import "github.com/cskr/pubsub"
 type Context struct {
 	Config
 
-	Port string
-	Hub  *pubsub.PubSub
+	Port    string
+	LogsDir string
+	DataDir string
+	Paths   RuntimePaths
+	Hub     *pubsub.PubSub
 }
