@@ -254,9 +254,11 @@ export interface AutoGatherControlledState {
 
 export interface AutoGatherScheduleConfig {
   enabled: boolean;
+  frequency?: 'weekly' | 'monthly' | string;
   hour: number;
   minute: number;
   weekdays: number[];
+  monthlyDay?: number;
   maxShows: number;
   maxBytes: number;
 }

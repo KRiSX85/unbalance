@@ -34,12 +34,14 @@ func (systemClock) Now() time.Time { return time.Now() }
 
 func defaultAutoGatherScheduleConfig() domain.AutoGatherScheduleConfig {
 	return domain.AutoGatherScheduleConfig{
-		Enabled:  false,
-		Hour:     autoGatherScheduleDefaultHour,
-		Minute:   autoGatherScheduleDefaultMin,
-		Weekdays: nil,
-		MaxShows: autoGatherScheduleDefaultShows,
-		MaxBytes: autoGatherScheduleDefaultBytes,
+		Enabled:    false,
+		Frequency:  domain.ScheduleFrequencyWeekly,
+		Hour:       autoGatherScheduleDefaultHour,
+		Minute:     autoGatherScheduleDefaultMin,
+		Weekdays:   nil,
+		MonthlyDay: 1,
+		MaxShows:   autoGatherScheduleDefaultShows,
+		MaxBytes:   autoGatherScheduleDefaultBytes,
 	}
 }
 
@@ -81,6 +83,7 @@ func (c *Core) initAutoGatherSchedule() {
 		return
 	}
 	c.scheduleConfig = doc.Config
+	normalizeScheduleConfig(&c.scheduleConfig)
 	c.scheduleState = doc.State
 	if verr := validateAutoGatherScheduleConfig(c.scheduleConfig, c.scheduleConfig.Enabled); verr != nil {
 		logger.Yellow("autoGatherSchedule: invalid persisted config (fail-safe disabled): %s", verr)
@@ -334,14 +337,16 @@ func (c *Core) GetAutoGatherScheduleStatus() domain.AutoGatherScheduleStatus {
 // Confirm is required when enabling or changing an already-enabled schedule.
 func (c *Core) SetAutoGatherSchedule(req domain.AutoGatherScheduleSetRequest) (domain.AutoGatherScheduleStatus, error) {
 	cfg := domain.AutoGatherScheduleConfig{
-		Enabled:  req.Enabled,
-		Hour:     req.Hour,
-		Minute:   req.Minute,
-		Weekdays: append([]int(nil), req.Weekdays...),
-		MaxShows: req.MaxShows,
-		MaxBytes: req.MaxBytes,
+		Enabled:    req.Enabled,
+		Frequency:  req.Frequency,
+		Hour:       req.Hour,
+		Minute:     req.Minute,
+		Weekdays:   append([]int(nil), req.Weekdays...),
+		MonthlyDay: req.MonthlyDay,
+		MaxShows:   req.MaxShows,
+		MaxBytes:   req.MaxBytes,
 	}
-	normalizeScheduleWeekdays(&cfg)
+	normalizeScheduleConfig(&cfg)
 
 	c.scheduleMu.Lock()
 	defer c.scheduleMu.Unlock()
@@ -400,8 +405,14 @@ func (c *Core) scheduleStatusLocked(now time.Time) domain.AutoGatherScheduleStat
 }
 
 func scheduleConfigMateriallyChanged(a, b domain.AutoGatherScheduleConfig) bool {
+	if scheduleFrequency(a) != scheduleFrequency(b) {
+		return true
+	}
 	if a.Hour != b.Hour || a.Minute != b.Minute || a.MaxShows != b.MaxShows || a.MaxBytes != b.MaxBytes {
 		return true
+	}
+	if scheduleFrequency(a) == domain.ScheduleFrequencyMonthly {
+		return a.MonthlyDay != b.MonthlyDay
 	}
 	if len(a.Weekdays) != len(b.Weekdays) {
 		return true
@@ -416,6 +427,28 @@ func scheduleConfigMateriallyChanged(a, b domain.AutoGatherScheduleConfig) bool 
 		}
 	}
 	return false
+}
+
+func scheduleFrequency(cfg domain.AutoGatherScheduleConfig) string {
+	if cfg.Frequency == domain.ScheduleFrequencyMonthly {
+		return domain.ScheduleFrequencyMonthly
+	}
+	return domain.ScheduleFrequencyWeekly
+}
+
+func normalizeScheduleConfig(cfg *domain.AutoGatherScheduleConfig) {
+	if cfg == nil {
+		return
+	}
+	normalizeScheduleWeekdays(cfg)
+	switch cfg.Frequency {
+	case domain.ScheduleFrequencyMonthly:
+		cfg.Frequency = domain.ScheduleFrequencyMonthly
+	case domain.ScheduleFrequencyWeekly, "":
+		cfg.Frequency = domain.ScheduleFrequencyWeekly
+	default:
+		// leave as-is for validation to reject
+	}
 }
 
 func normalizeScheduleWeekdays(cfg *domain.AutoGatherScheduleConfig) {
@@ -438,7 +471,7 @@ func normalizeScheduleWeekdays(cfg *domain.AutoGatherScheduleConfig) {
 	cfg.Weekdays = out
 }
 
-func validateAutoGatherScheduleConfig(cfg domain.AutoGatherScheduleConfig, requireDays bool) error {
+func validateAutoGatherScheduleConfig(cfg domain.AutoGatherScheduleConfig, enabled bool) error {
 	if cfg.Hour < 0 || cfg.Hour > 23 {
 		return fmt.Errorf("hour must be 0-23")
 	}
@@ -454,15 +487,30 @@ func validateAutoGatherScheduleConfig(cfg domain.AutoGatherScheduleConfig, requi
 	if cfg.MaxBytes == 0 {
 		return fmt.Errorf("maxBytes must be greater than 0")
 	}
-	for _, d := range cfg.Weekdays {
-		if d < 0 || d > 6 {
-			return fmt.Errorf("invalid weekday %d", d)
+
+	freq := cfg.Frequency
+	if freq == "" {
+		freq = domain.ScheduleFrequencyWeekly
+	}
+	switch freq {
+	case domain.ScheduleFrequencyMonthly:
+		if cfg.MonthlyDay < 1 || cfg.MonthlyDay > 28 {
+			return fmt.Errorf("monthlyDay must be an integer from 1 to 28")
 		}
+		return nil
+	case domain.ScheduleFrequencyWeekly:
+		for _, d := range cfg.Weekdays {
+			if d < 0 || d > 6 {
+				return fmt.Errorf("invalid weekday %d", d)
+			}
+		}
+		if enabled && len(cfg.Weekdays) == 0 {
+			return fmt.Errorf("at least one weekday is required when the schedule is enabled")
+		}
+		return nil
+	default:
+		return fmt.Errorf("frequency must be weekly or monthly")
 	}
-	if requireDays && len(cfg.Weekdays) == 0 {
-		return fmt.Errorf("at least one weekday is required when the schedule is enabled")
-	}
-	return nil
 }
 
 func scheduleOccurrenceID(t time.Time) string {
@@ -473,11 +521,18 @@ func scheduleOccurrenceDue(cfg domain.AutoGatherScheduleConfig, now time.Time) (
 	if !cfg.Enabled {
 		return "", false
 	}
-	if !weekdaySelected(cfg.Weekdays, now.Weekday()) {
-		return "", false
-	}
 	if now.Hour() != cfg.Hour || now.Minute() != cfg.Minute {
 		return "", false
+	}
+	switch scheduleFrequency(cfg) {
+	case domain.ScheduleFrequencyMonthly:
+		if now.Day() != cfg.MonthlyDay {
+			return "", false
+		}
+	default:
+		if !weekdaySelected(cfg.Weekdays, now.Weekday()) {
+			return "", false
+		}
 	}
 	return scheduleOccurrenceID(now), true
 }
@@ -495,7 +550,17 @@ func weekdaySelected(days []int, day time.Weekday) bool {
 // nextScheduleOccurrence returns the next future (or still-due unattempted) occurrence.
 // It never returns a past occurrence, so restarts do not catch up missed runs.
 func nextScheduleOccurrence(cfg domain.AutoGatherScheduleConfig, from time.Time, lastAttempted string) (time.Time, bool) {
-	if !cfg.Enabled || len(cfg.Weekdays) == 0 {
+	if !cfg.Enabled {
+		return time.Time{}, false
+	}
+	if scheduleFrequency(cfg) == domain.ScheduleFrequencyMonthly {
+		return nextMonthlyScheduleOccurrence(cfg, from, lastAttempted)
+	}
+	return nextWeeklyScheduleOccurrence(cfg, from, lastAttempted)
+}
+
+func nextWeeklyScheduleOccurrence(cfg domain.AutoGatherScheduleConfig, from time.Time, lastAttempted string) (time.Time, bool) {
+	if len(cfg.Weekdays) == 0 {
 		return time.Time{}, false
 	}
 	local := from.In(time.Local)
@@ -519,6 +584,23 @@ func nextScheduleOccurrence(cfg domain.AutoGatherScheduleConfig, from time.Time,
 	return time.Time{}, false
 }
 
+func nextMonthlyScheduleOccurrence(cfg domain.AutoGatherScheduleConfig, from time.Time, lastAttempted string) (time.Time, bool) {
+	if cfg.MonthlyDay < 1 || cfg.MonthlyDay > 28 {
+		return time.Time{}, false
+	}
+	local := from.In(time.Local)
+	thisMonth := time.Date(local.Year(), local.Month(), cfg.MonthlyDay, cfg.Hour, cfg.Minute, 0, 0, local.Location())
+	if thisMonth.After(local) {
+		return thisMonth, true
+	}
+	if oid, due := scheduleOccurrenceDue(cfg, local); due && oid != lastAttempted {
+		return thisMonth, true
+	}
+	// Already past this month's slot (or already attempted) → next month.
+	nextMonth := thisMonth.AddDate(0, 1, 0)
+	return nextMonth, true
+}
+
 func (c *Core) loadAutoGatherScheduleFile() (domain.AutoGatherScheduleFile, error) {
 	path := c.scheduleFilePath()
 	data, err := os.ReadFile(path)
@@ -538,7 +620,7 @@ func (c *Core) loadAutoGatherScheduleFile() (domain.AutoGatherScheduleFile, erro
 	if doc.Version == 0 {
 		doc.Version = autoGatherScheduleFileVersion
 	}
-	normalizeScheduleWeekdays(&doc.Config)
+	normalizeScheduleConfig(&doc.Config)
 	if doc.Config.MaxShows == 0 && doc.Config.MaxBytes == 0 && !doc.Config.Enabled {
 		// Empty/zero document → defaults (disabled).
 		doc.Config = defaultAutoGatherScheduleConfig()

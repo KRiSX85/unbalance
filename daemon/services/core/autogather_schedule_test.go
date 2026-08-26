@@ -72,6 +72,9 @@ func TestScheduleDisabledByDefault(t *testing.T) {
 	if st.Enabled || st.Config.Enabled {
 		t.Fatal("scheduler must be disabled by default")
 	}
+	if st.Config.Frequency != domain.ScheduleFrequencyWeekly {
+		t.Fatalf("default frequency=%q want weekly", st.Config.Frequency)
+	}
 	if st.Config.MaxShows != 1 || st.Config.MaxBytes != autoGatherScheduleDefaultBytes {
 		t.Fatalf("unexpected defaults: %+v", st.Config)
 	}
@@ -638,3 +641,338 @@ func TestSchedulePersistUsesTempRename(t *testing.T) {
 		t.Fatal("corrupt schedule json must fail safe disabled")
 	}
 }
+
+func TestScheduleLegacyConfigWithoutFrequencyLoadsAsWeekly(t *testing.T) {
+	c, _ := newCoreForScheduleTest(t)
+	// Pre-frequency document shape (no frequency / monthlyDay fields).
+	legacy := `{
+  "version": 1,
+  "config": {
+    "enabled": true,
+    "hour": 3,
+    "minute": 0,
+    "weekdays": [1, 3],
+    "maxShows": 2,
+    "maxBytes": 5000000000
+  },
+  "state": {}
+}`
+	if err := os.WriteFile(c.scheduleFilePath(), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.initAutoGatherSchedule()
+	st := c.GetAutoGatherScheduleStatus()
+	if st.ConfigError != "" {
+		t.Fatalf("legacy weekly config must load cleanly, got configError=%q", st.ConfigError)
+	}
+	if !st.Enabled {
+		t.Fatal("legacy enabled schedule must remain enabled")
+	}
+	if st.Config.Frequency != domain.ScheduleFrequencyWeekly {
+		t.Fatalf("frequency=%q want weekly", st.Config.Frequency)
+	}
+	if len(st.Config.Weekdays) != 2 || st.Config.Weekdays[0] != 1 || st.Config.Weekdays[1] != 3 {
+		t.Fatalf("weekdays must be preserved: %v", st.Config.Weekdays)
+	}
+	if st.Config.MaxShows != 2 || st.Config.MaxBytes != 5_000_000_000 {
+		t.Fatalf("bounds altered: %+v", st.Config)
+	}
+}
+
+func TestScheduleMonthlyValidation(t *testing.T) {
+	c, _ := newCoreForScheduleTest(t)
+	for _, day := range []int{1, 28} {
+		if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+			Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+			MonthlyDay: day, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+		}); err != nil {
+			t.Fatalf("day %d should be valid: %v", day, err)
+		}
+	}
+	for _, day := range []int{0, 29, 31} {
+		_, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+			Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+			MonthlyDay: day, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+		})
+		if err == nil || !strings.Contains(err.Error(), "monthlyDay") {
+			t.Fatalf("day %d should be invalid, got %v", day, err)
+		}
+	}
+}
+
+func TestScheduleMalformedMonthlyFailsSafe(t *testing.T) {
+	c, _ := newCoreForScheduleTest(t)
+	bad := `{
+  "version": 1,
+  "config": {
+    "enabled": true,
+    "frequency": "monthly",
+    "hour": 3,
+    "minute": 0,
+    "monthlyDay": 29,
+    "maxShows": 1,
+    "maxBytes": 1000000000
+  },
+  "state": {}
+}`
+	if err := os.WriteFile(c.scheduleFilePath(), []byte(bad), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c.initAutoGatherSchedule()
+	st := c.GetAutoGatherScheduleStatus()
+	if st.Enabled {
+		t.Fatal("invalid monthly day must fail safe disabled")
+	}
+	if st.ConfigError == "" {
+		t.Fatal("expected config error")
+	}
+}
+
+func TestScheduleFrequencyChangeRequiresConfirm(t *testing.T) {
+	c, _ := newCoreForScheduleTest(t)
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyWeekly, Hour: 3, Minute: 0,
+		Weekdays: []int{1}, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: false,
+	})
+	if err == nil || !strings.Contains(err.Error(), "confirmation") {
+		t.Fatalf("frequency change on armed schedule requires confirm, got %v", err)
+	}
+}
+
+func TestScheduleMonthlyNextOccurrence(t *testing.T) {
+	cfg := domain.AutoGatherScheduleConfig{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly,
+		Hour: 3, Minute: 0, MonthlyDay: 15, MaxShows: 1, MaxBytes: 1,
+	}
+	// Before this month's day → same month.
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.Local)
+	next, ok := nextScheduleOccurrence(cfg, now, "")
+	if !ok || scheduleOccurrenceID(next) != "2026-08-15@03:00" {
+		t.Fatalf("same month next=%v ok=%v", next, ok)
+	}
+	// After this month's slot → next month.
+	now = time.Date(2026, 8, 15, 3, 1, 0, 0, time.Local)
+	next, ok = nextScheduleOccurrence(cfg, now, "")
+	if !ok || scheduleOccurrenceID(next) != "2026-09-15@03:00" {
+		t.Fatalf("roll month next=%v ok=%v", next, ok)
+	}
+	// December → January year rollover.
+	now = time.Date(2026, 12, 20, 0, 0, 0, 0, time.Local)
+	cfg.MonthlyDay = 15
+	next, ok = nextScheduleOccurrence(cfg, now, "")
+	if !ok || scheduleOccurrenceID(next) != "2027-01-15@03:00" {
+		t.Fatalf("year roll next=%v ok=%v", next, ok)
+	}
+	// February day 28.
+	cfg.MonthlyDay = 28
+	now = time.Date(2026, 2, 10, 0, 0, 0, 0, time.Local)
+	next, ok = nextScheduleOccurrence(cfg, now, "")
+	if !ok || scheduleOccurrenceID(next) != "2026-02-28@03:00" {
+		t.Fatalf("feb next=%v ok=%v", next, ok)
+	}
+	// Exact scheduled minute due.
+	cfg.MonthlyDay = 15
+	now = time.Date(2026, 8, 15, 3, 0, 20, 0, time.Local)
+	id, due := scheduleOccurrenceDue(cfg, now)
+	if !due || id != "2026-08-15@03:00" {
+		t.Fatalf("due=%v id=%q", due, id)
+	}
+	next, ok = nextScheduleOccurrence(cfg, now, "")
+	if !ok || scheduleOccurrenceID(next) != id {
+		t.Fatalf("exact minute next=%v", next)
+	}
+	// Already attempted → advance one month.
+	next, ok = nextScheduleOccurrence(cfg, now, id)
+	if !ok || scheduleOccurrenceID(next) != "2026-09-15@03:00" {
+		t.Fatalf("after attempt next=%v", next)
+	}
+}
+
+func TestScheduleMonthlyIgnoresWeekdays(t *testing.T) {
+	cfg := domain.AutoGatherScheduleConfig{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly,
+		Hour: 3, Minute: 0, MonthlyDay: 15,
+		Weekdays: []int{int(time.Monday)}, // must not affect monthly
+		MaxShows: 1, MaxBytes: 1,
+	}
+	// 2026-08-15 is a Saturday; weekly Monday would not match.
+	now := time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local)
+	id, due := scheduleOccurrenceDue(cfg, now)
+	if !due || id != "2026-08-15@03:00" {
+		t.Fatalf("monthly must ignore weekdays: due=%v id=%q", due, id)
+	}
+}
+
+func TestScheduleWeeklyIgnoresMonthlyDay(t *testing.T) {
+	cfg := domain.AutoGatherScheduleConfig{
+		Enabled: true, Frequency: domain.ScheduleFrequencyWeekly,
+		Hour: 3, Minute: 0, Weekdays: []int{int(time.Monday)},
+		MonthlyDay: 15, // must not affect weekly
+		MaxShows:   1, MaxBytes: 1,
+	}
+	// Monday 2026-08-24 is day 24, not 15.
+	now := time.Date(2026, 8, 24, 3, 0, 5, 0, time.Local)
+	id, due := scheduleOccurrenceDue(cfg, now)
+	if !due || id != "2026-08-24@03:00" {
+		t.Fatalf("weekly must ignore monthlyDay: due=%v id=%q", due, id)
+	}
+}
+
+func TestScheduleMonthlyNoDoubleFireOrCatchUp(t *testing.T) {
+	c, clock := newCoreForScheduleTest(t)
+	c.ctx.DryRun = true // force skip path without Stage 3D
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+	st := c.GetAutoGatherScheduleStatus()
+	if st.LastAttemptedOccurrence != "2026-08-15@03:00" || st.LastResult != domain.ScheduleResultSkippedDryRun {
+		t.Fatalf("unexpected first attempt: %+v", st)
+	}
+	c.evaluateAutoGatherSchedule()
+	if c.GetAutoGatherScheduleStatus().LastResult != domain.ScheduleResultSkippedDryRun {
+		t.Fatal("same monthly occurrence must not re-fire")
+	}
+	// Restart must not re-fire.
+	c2 := &Core{ctx: c.ctx, state: &domain.State{Status: common.OpNeutral}, scheduleNow: clock}
+	c2.initAutoGatherSchedule()
+	c2.evaluateAutoGatherSchedule()
+	if c2.GetAutoGatherScheduleStatus().LastAttemptedOccurrence != "2026-08-15@03:00" {
+		t.Fatal("restart must retain lastAttemptedOccurrence")
+	}
+	if c2.isAutoGatherControlledActive() {
+		t.Fatal("restart must not start Stage 3D for same occurrence")
+	}
+	// Missed: jump past the minute without a prior attempt on a fresh core — no catch-up.
+	c3, clock3 := newCoreForScheduleTest(t)
+	if _, err := c3.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clock3.Set(time.Date(2026, 8, 15, 4, 0, 0, 0, time.Local))
+	c3.evaluateAutoGatherSchedule()
+	if c3.GetAutoGatherScheduleStatus().LastAttemptedOccurrence != "" {
+		t.Fatal("missed monthly occurrence must not be caught up")
+	}
+	next := c3.GetAutoGatherScheduleStatus().NextOccurrence
+	if next != "2026-09-15@03:00" {
+		t.Fatalf("next after miss=%q", next)
+	}
+}
+
+func TestScheduleMonthlyBusyAndInterruptedSkip(t *testing.T) {
+	c, clock := newCoreForScheduleTest(t)
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 2, MaxBytes: 7_000_000_000, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local))
+	c.state.Status = common.OpScatterMove
+	c.evaluateAutoGatherSchedule()
+	if c.GetAutoGatherScheduleStatus().LastResult != domain.ScheduleResultSkippedBusy {
+		t.Fatalf("busy: %q", c.GetAutoGatherScheduleStatus().LastResult)
+	}
+	// New core/month day for interrupted path.
+	c2, clock2 := newCoreForScheduleTest(t)
+	if _, err := c2.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 2, MaxBytes: 7_000_000_000, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c2.autoGatherControlledRun = &domain.AutoGatherControlledState{Phase: domain.AutoGatherControlledPhaseInterrupted}
+	clock2.Set(time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local))
+	c2.evaluateAutoGatherSchedule()
+	if c2.GetAutoGatherScheduleStatus().LastResult != domain.ScheduleResultSkippedInterrupted {
+		t.Fatalf("interrupted: %q", c2.GetAutoGatherScheduleStatus().LastResult)
+	}
+}
+
+func TestScheduleMonthlyPassesBoundsUnchanged(t *testing.T) {
+	c, clock := newCoreForScheduleTest(t)
+	const shows = 3
+	const bytes = uint64(4_000_000_000)
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: shows, MaxBytes: bytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st := c.GetAutoGatherScheduleStatus()
+	if st.Config.MaxShows != shows || st.Config.MaxBytes != bytes {
+		t.Fatalf("bounds not preserved: %+v", st.Config)
+	}
+	// Dry-run skip still records attempt; bounds used only on Start path — verify config read at evaluate.
+	c.ctx.DryRun = true
+	clock.Set(time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+	if c.scheduleConfig.MaxShows != shows || c.scheduleConfig.MaxBytes != bytes {
+		t.Fatal("evaluate must not mutate stored bounds")
+	}
+}
+
+func TestScheduleMonthlyStartsStage3DOnceWithBounds(t *testing.T) {
+	c, clock := newCoreForScheduleTest(t)
+	autoGatherControlledScanHook = func(c *Core) domain.AutoGatherScanResult {
+		return domain.AutoGatherScanResult{Shows: nil}
+	}
+	t.Cleanup(func() { autoGatherControlledScanHook = nil })
+
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyMonthly, Hour: 3, Minute: 0,
+		MonthlyDay: 15, MaxShows: 2, MaxBytes: 7_000_000_000, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	clock.Set(time.Date(2026, 8, 15, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+
+	deadline := time.Now().Add(2 * time.Second)
+	var state domain.AutoGatherControlledState
+	for time.Now().Before(deadline) {
+		state = c.GetAutoGatherControlledState()
+		if state.SessionID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if state.Trigger != domain.AutoGatherTriggerScheduled {
+		t.Fatalf("trigger=%q", state.Trigger)
+	}
+	if state.MaxShows != 2 || state.MaxBytes != 7_000_000_000 {
+		t.Fatalf("bounds maxShows=%d maxBytes=%d", state.MaxShows, state.MaxBytes)
+	}
+	st := c.GetAutoGatherScheduleStatus()
+	if st.LastAttemptedOccurrence != "2026-08-15@03:00" {
+		t.Fatalf("occurrence=%q", st.LastAttemptedOccurrence)
+	}
+	session := state.SessionID
+	c.evaluateAutoGatherSchedule()
+	if c.GetAutoGatherControlledState().SessionID != session {
+		t.Fatal("second evaluate must not start a second Stage 3D session")
+	}
+	c.StopAutoGatherControlled()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ph := c.GetAutoGatherControlledState().Phase
+		if ph != domain.AutoGatherControlledPhaseRunning && ph != domain.AutoGatherControlledPhaseStopping {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+

@@ -364,9 +364,11 @@ export class Api {
 
   static async setAutoGatherSchedule(payload: {
     enabled: boolean;
+    frequency: 'weekly' | 'monthly';
     hour: number;
     minute: number;
     weekdays: number[];
+    monthlyDay: number;
     maxShows: number;
     maxBytes: number;
     confirm: boolean;

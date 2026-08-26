@@ -9,8 +9,11 @@ import { Api } from '~/api';
 import { AutoGatherScheduleStatus } from '~/types';
 import { bytesFromDecimalGB, formatByteBoundAsGB } from '~/helpers/units';
 import {
+  formatScheduleDescription,
   formatScheduleResult,
+  normalizeScheduleFrequency,
   SCHEDULE_ENABLE_WARNING,
+  ScheduleFrequency,
   WEEKDAY_OPTIONS,
 } from '~/helpers/auto-gather-schedule-ui';
 
@@ -19,9 +22,11 @@ const pad2 = (n: number) => String(n).padStart(2, '0');
 export const Schedule: React.FunctionComponent = () => {
   const [status, setStatus] = React.useState<AutoGatherScheduleStatus | null>(null);
   const [enabled, setEnabled] = React.useState(false);
+  const [frequency, setFrequency] = React.useState<ScheduleFrequency>('weekly');
   const [hour, setHour] = React.useState(3);
   const [minute, setMinute] = React.useState(0);
   const [weekdays, setWeekdays] = React.useState<number[]>([]);
+  const [monthlyDay, setMonthlyDay] = React.useState(1);
   const [maxShows, setMaxShows] = React.useState(1);
   const [maxGB, setMaxGB] = React.useState(10);
   const [pendingEnable, setPendingEnable] = React.useState(false);
@@ -30,17 +35,27 @@ export const Schedule: React.FunctionComponent = () => {
   const [error, setError] = React.useState('');
   const [loaded, setLoaded] = React.useState(false);
 
-  const refresh = React.useCallback(async () => {
-    const next = await Api.getAutoGatherSchedule();
+  const applyStatus = (next: AutoGatherScheduleStatus) => {
     setStatus(next);
     setEnabled(!!next.config?.enabled);
+    setFrequency(normalizeScheduleFrequency(next.config?.frequency));
     setHour(next.config?.hour ?? 3);
     setMinute(next.config?.minute ?? 0);
     setWeekdays([...(next.config?.weekdays || [])]);
+    setMonthlyDay(
+      next.config?.monthlyDay && next.config.monthlyDay >= 1 && next.config.monthlyDay <= 28
+        ? next.config.monthlyDay
+        : 1,
+    );
     setMaxShows(next.config?.maxShows || 1);
     const bytes = next.config?.maxBytes || bytesFromDecimalGB(10);
     setMaxGB(Math.max(1, Math.round(bytes / 1_000_000_000)));
     setLoaded(true);
+  };
+
+  const refresh = React.useCallback(async () => {
+    const next = await Api.getAutoGatherSchedule();
+    applyStatus(next);
   }, []);
 
   React.useEffect(() => {
@@ -49,12 +64,26 @@ export const Schedule: React.FunctionComponent = () => {
     );
   }, [refresh]);
 
+  const schedulePayload = (enabledValue: boolean, confirm: boolean) => ({
+    enabled: enabledValue,
+    frequency,
+    hour,
+    minute,
+    weekdays,
+    monthlyDay,
+    maxShows,
+    maxBytes: bytesFromDecimalGB(maxGB),
+    confirm,
+  });
+
   const dirty =
     loaded &&
     status != null &&
     (enabled !== !!status.config.enabled ||
+      frequency !== normalizeScheduleFrequency(status.config.frequency) ||
       hour !== status.config.hour ||
       minute !== status.config.minute ||
+      monthlyDay !== (status.config.monthlyDay || 1) ||
       maxShows !== status.config.maxShows ||
       bytesFromDecimalGB(maxGB) !== status.config.maxBytes ||
       JSON.stringify([...weekdays].sort()) !==
@@ -64,16 +93,8 @@ export const Schedule: React.FunctionComponent = () => {
     setBusy(true);
     setError('');
     try {
-      const next = await Api.setAutoGatherSchedule({
-        enabled,
-        hour,
-        minute,
-        weekdays,
-        maxShows,
-        maxBytes: bytesFromDecimalGB(maxGB),
-        confirm,
-      });
-      setStatus(next);
+      const next = await Api.setAutoGatherSchedule(schedulePayload(enabled, confirm));
+      applyStatus(next);
       setPendingEnable(false);
       setPendingSave(false);
     } catch (e) {
@@ -96,17 +117,9 @@ export const Schedule: React.FunctionComponent = () => {
     if (!next && status?.config.enabled) {
       // Disable immediately without destructive confirm.
       setBusy(true);
-      void Api.setAutoGatherSchedule({
-        enabled: false,
-        hour,
-        minute,
-        weekdays,
-        maxShows,
-        maxBytes: bytesFromDecimalGB(maxGB),
-        confirm: false,
-      })
+      void Api.setAutoGatherSchedule(schedulePayload(false, false))
         .then((s) => {
-          setStatus(s);
+          applyStatus(s);
           setEnabled(false);
         })
         .catch((e) => setError(e instanceof Error ? e.message : 'Unable to disable'))
@@ -136,6 +149,14 @@ export const Schedule: React.FunctionComponent = () => {
     return <div className="p-4 text-sm">Loading schedule…</div>;
   }
 
+  const summary = formatScheduleDescription({
+    frequency,
+    weekdays,
+    monthlyDay,
+    hour,
+    minute,
+  });
+
   return (
     <div className="p-4 max-w-3xl space-y-4">
       <h1 className="text-xl font-bold">Scheduled Auto Gather</h1>
@@ -159,7 +180,13 @@ export const Schedule: React.FunctionComponent = () => {
             <span className="font-semibold">Schedule:</span>{' '}
             {status.enabled ? 'Enabled' : 'Disabled'}
             {status.enabled
-              ? ` — ${pad2(status.config.hour)}:${pad2(status.config.minute)} server local`
+              ? ` — ${formatScheduleDescription({
+                  frequency: status.config.frequency,
+                  weekdays: status.config.weekdays,
+                  monthlyDay: status.config.monthlyDay,
+                  hour: status.config.hour,
+                  minute: status.config.minute,
+                })}`
               : ''}
           </div>
           <div>
@@ -207,6 +234,25 @@ export const Schedule: React.FunctionComponent = () => {
         </RadioGroup>
       </div>
 
+      <div>
+        <h2 className="font-semibold mb-2">Frequency</h2>
+        <RadioGroup
+          value={frequency}
+          onValueChange={(v) => setFrequency(v === 'monthly' ? 'monthly' : 'weekly')}
+          disabled={busy}
+        >
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="weekly" id="sched-freq-weekly" />
+            <Label htmlFor="sched-freq-weekly">Weekly</Label>
+          </div>
+          <div className="flex items-center space-x-2">
+            <RadioGroupItem value="monthly" id="sched-freq-monthly" />
+            <Label htmlFor="sched-freq-monthly">Monthly</Label>
+          </div>
+        </RadioGroup>
+        <p className="text-sm text-slate-600 dark:text-slate-300 mt-2">{summary}</p>
+      </div>
+
       <div className="flex flex-wrap gap-4 items-end">
         <div>
           <Label htmlFor="sched-hour">Hour (0–23, server local)</Label>
@@ -239,22 +285,43 @@ export const Schedule: React.FunctionComponent = () => {
         </div>
       </div>
 
-      <div>
-        <h2 className="font-semibold mb-2">Days of week</h2>
-        <div className="flex flex-wrap gap-3">
-          {WEEKDAY_OPTIONS.map((day) => (
-            <label key={day.value} className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={weekdays.includes(day.value)}
-                disabled={busy}
-                onChange={() => toggleDay(day.value)}
-              />
-              {day.label}
-            </label>
-          ))}
+      {frequency === 'weekly' ? (
+        <div>
+          <h2 className="font-semibold mb-2">Days of week</h2>
+          <div className="flex flex-wrap gap-3">
+            {WEEKDAY_OPTIONS.map((day) => (
+              <label key={day.value} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={weekdays.includes(day.value)}
+                  disabled={busy}
+                  onChange={() => toggleDay(day.value)}
+                />
+                {day.label}
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
+      ) : (
+        <div>
+          <Label htmlFor="sched-month-day">Day of month (1–28)</Label>
+          <Input
+            id="sched-month-day"
+            className="w-24 mt-1"
+            type="number"
+            min={1}
+            max={28}
+            value={monthlyDay}
+            disabled={busy}
+            onChange={(e) =>
+              setMonthlyDay(Math.min(28, Math.max(1, parseInt(e.target.value) || 1)))
+            }
+          />
+          <p className="text-xs text-slate-600 dark:text-slate-400 mt-1">
+            Days 29–31 are not supported yet so every month stays deterministic.
+          </p>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-4">
         <div>
