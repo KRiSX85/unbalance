@@ -84,6 +84,12 @@ type Core struct {
 	autoGatherLibraryRevision uint64
 	autoGatherLibraryScan     *domain.AutoGatherScanResult
 	autoGatherLibrarySummary  domain.AutoGatherLibrarySummary
+
+	scheduleMu      sync.RWMutex
+	scheduleConfig  domain.AutoGatherScheduleConfig
+	scheduleState   domain.AutoGatherScheduleState
+	scheduleStop    chan struct{}
+	scheduleNow     Clock // injectable; nil means system clock
 }
 
 func Create(ctx *domain.Context) *Core {
@@ -137,6 +143,8 @@ func (c *Core) Start() error {
 	c.sid = sid
 
 	c.RecoverAutoGatherControlledInterrupted()
+	c.initAutoGatherSchedule()
+	c.startAutoGatherScheduler()
 
 	go c.mailboxHandler()
 
@@ -144,6 +152,7 @@ func (c *Core) Start() error {
 }
 
 func (c *Core) Stop() error {
+	c.stopAutoGatherScheduler()
 	c.persistAutoGatherControlledForShutdown()
 	return nil
 }
@@ -233,6 +242,7 @@ func (c *Core) mailboxHandler() {
 			c.stopped = true
 			c.requestAutoGatherDryRunStop()
 			c.requestAutoGatherRealStop()
+			c.StopAutoGatherControlled()
 		}
 	}
 }

@@ -586,6 +586,7 @@ export const AutoGather: React.FunctionComponent = () => {
         confirm: true,
         maxShows: controlledMaxShows,
         maxBytes: bytesFromDecimalGB(controlledMaxGB),
+        trigger: 'manual',
       });
       applyControlledStatus(state);
       toast({
@@ -1144,10 +1145,14 @@ export const AutoGather: React.FunctionComponent = () => {
           <div className="mt-4 rounded border border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20 p-3 space-y-2">
             <div className="font-semibold text-orange-900 dark:text-orange-100">
               Controlled Real Auto Gather (Stage 3D)
+              {controlledState?.trigger === 'scheduled' ? ' — Scheduled' : ''}
             </div>
             <div className="text-xs text-orange-800 dark:text-orange-200">
               Orchestrates multiple one-show real Gather moves sequentially.
               This is NOT a dry run — files will be moved and successfully transferred sources removed.
+              {controlledState?.trigger === 'scheduled'
+                ? ' This session was started by the scheduler.'
+                : ''}
             </div>
             {shouldShowControlledStartControls(controlledState?.phase) && (
               <div className="flex flex-wrap items-center gap-2">

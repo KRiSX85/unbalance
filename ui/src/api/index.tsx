@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState, Config } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState, AutoGatherScheduleStatus, Config } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -283,6 +283,7 @@ export class Api {
     confirm: boolean;
     maxShows: number;
     maxBytes: number;
+    trigger?: string;
   }): Promise<AutoGatherControlledState> {
     const response = await fetch(`${Api.host}/auto-gather/controlled/start`, {
       method: 'POST',
@@ -347,6 +348,46 @@ export class Api {
     });
     if (!response.ok) {
       throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async getAutoGatherSchedule(): Promise<AutoGatherScheduleStatus> {
+    const response = await fetch(`${Api.host}/auto-gather/schedule`, {
+      credentials: 'same-origin',
+    });
+    if (!response.ok) {
+      throw new Error(await response.text());
+    }
+    return response.json();
+  }
+
+  static async setAutoGatherSchedule(payload: {
+    enabled: boolean;
+    hour: number;
+    minute: number;
+    weekdays: number[];
+    maxShows: number;
+    maxBytes: number;
+    confirm: boolean;
+  }): Promise<AutoGatherScheduleStatus> {
+    const response = await fetch(`${Api.host}/auto-gather/schedule`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      credentials: 'same-origin',
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      let message = `Unable to update schedule (${response.status})`;
+      try {
+        const body = await response.json();
+        if (body?.message) {
+          message = String(body.message);
+        }
+      } catch {
+        // keep default
+      }
+      throw new Error(message);
     }
     return response.json();
   }

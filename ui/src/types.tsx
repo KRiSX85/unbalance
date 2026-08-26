@@ -247,8 +247,36 @@ export interface AutoGatherControlledState {
   rsyncProbe?: AutoGatherControlledRsyncProbe;
   requiresAcknowledgement?: boolean;
   canAcknowledge?: boolean;
+  trigger?: string;
   libraryRevision?: number;
   librarySummary?: AutoGatherLibrarySummary;
+}
+
+export interface AutoGatherScheduleConfig {
+  enabled: boolean;
+  hour: number;
+  minute: number;
+  weekdays: number[];
+  maxShows: number;
+  maxBytes: number;
+}
+
+export interface AutoGatherScheduleStatus {
+  config: AutoGatherScheduleConfig;
+  enabled: boolean;
+  timezone: string;
+  timezoneOffsetMinutes: number;
+  serverLocalTime: string;
+  nextOccurrence?: string;
+  nextOccurrenceAt?: string;
+  lastAttemptedOccurrence?: string;
+  lastResult?: string;
+  lastResultDetail?: string;
+  lastAttemptAt?: string;
+  lastEndedAt?: string;
+  lastSessionId?: string;
+  configError?: string;
+  globalDryRun: boolean;
 }
 
 export interface AutoGatherLibrarySummary {

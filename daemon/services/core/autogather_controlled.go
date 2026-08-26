@@ -77,6 +77,17 @@ func (c *Core) StartAutoGatherControlled(req domain.AutoGatherControlledStartReq
 	if req.MaxBytes <= 0 {
 		req.MaxBytes = autoGatherControlledDefaultMaxBytes
 	}
+	trigger := strings.TrimSpace(req.Trigger)
+	if trigger == "" {
+		trigger = domain.AutoGatherTriggerManual
+	}
+	if trigger != domain.AutoGatherTriggerManual && trigger != domain.AutoGatherTriggerScheduled {
+		return domain.AutoGatherControlledState{
+			Phase:        domain.AutoGatherControlledPhaseIdle,
+			GlobalDryRun: c.ctx.DryRun,
+			Error:        "invalid controlled session trigger",
+		}, fmt.Errorf("invalid controlled session trigger")
+	}
 
 	c.autoGatherMu.Lock()
 	defer c.autoGatherMu.Unlock()
@@ -119,12 +130,13 @@ func (c *Core) StartAutoGatherControlled(req domain.AutoGatherControlledStartReq
 		StartedAt: now,
 		Message:   autoGatherControlledMessage,
 		SessionID: c.newControlledSessionID(),
+		Trigger:   trigger,
 	}
 	c.autoGatherControlledStopRequested = false
 	c.autoGatherControlledShutdown = false
 	c.state.Status = common.OpAutoGatherReal
 
-	autoGatherControlledLog("session started id=%s maxShows=%d maxBytes=%d", c.autoGatherControlledRun.SessionID, req.MaxShows, req.MaxBytes)
+	autoGatherControlledLog("session started id=%s trigger=%s maxShows=%d maxBytes=%d", c.autoGatherControlledRun.SessionID, trigger, req.MaxShows, req.MaxBytes)
 	c.writeAutoGatherControlledMarkerLocked()
 	go c.autoGatherControlledLoop(req.MaxShows, req.MaxBytes)
 	return c.snapshotAutoGatherControlledLocked(), nil

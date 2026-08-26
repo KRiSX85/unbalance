@@ -14,6 +14,7 @@ const (
 	HistoryVersion  = 2
 	SessionFilename = "unbalanced.sessions"
 	LogFilename     = "unbalanced.log"
+	ScheduleFilename = "autogather_schedule.json"
 	RsyncArgs       = "-avPR"
 )
 

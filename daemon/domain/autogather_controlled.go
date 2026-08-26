@@ -20,6 +20,9 @@ type AutoGatherControlledStartRequest struct {
 	Confirm  bool   `json:"confirm"`
 	MaxShows int    `json:"maxShows"`
 	MaxBytes uint64 `json:"maxBytes"`
+	// Trigger identifies how the session was started: "manual" (default) or "scheduled".
+	// The scheduler sets "scheduled"; it never changes DRY_RUN.
+	Trigger string `json:"trigger,omitempty"`
 }
 
 // AutoGatherControlledAcknowledgeRequest clears an interrupted session after
@@ -82,6 +85,8 @@ type AutoGatherControlledState struct {
 	RsyncProbe              *AutoGatherControlledRsyncProbe  `json:"rsyncProbe,omitempty"`
 	RequiresAcknowledgement bool                             `json:"requiresAcknowledgement,omitempty"`
 	CanAcknowledge          bool                             `json:"canAcknowledge,omitempty"`
+	// Trigger is "manual" or "scheduled" for the active/last session.
+	Trigger string `json:"trigger,omitempty"`
 	// LibraryRevision/LibrarySummary are compact presentation hints. The
 	// full Stage 1+2 dataset is never included in controlled/status; the
 	// browser fetches it separately when the revision changes.

@@ -130,6 +130,8 @@ func (s *Server) Start() error {
 	protected.POST("/auto-gather/controlled/reset", s.autoGatherControlledReset, s.requireCSRF)
 	protected.POST("/auto-gather/controlled/acknowledge", s.autoGatherControlledAcknowledge, s.requireCSRF)
 	protected.GET("/auto-gather/controlled/status", s.autoGatherControlledStatus)
+	protected.GET("/auto-gather/schedule", s.autoGatherScheduleGet)
+	protected.PUT("/auto-gather/schedule", s.autoGatherScheduleSet, s.requireCSRF)
 	protected.GET("/logs", s.getLog)
 	protected.PUT("/config/dryRun", s.toggleDryRun, s.requireCSRF)
 	protected.PUT("/config/notifyPlan", s.setNotifyPlan, s.requireCSRF)
@@ -475,6 +477,22 @@ func (s *Server) autoGatherControlledAcknowledge(c echo.Context) error {
 
 func (s *Server) autoGatherControlledStatus(c echo.Context) error {
 	return c.JSON(200, s.core.GetAutoGatherControlledState())
+}
+
+func (s *Server) autoGatherScheduleGet(c echo.Context) error {
+	return c.JSON(200, s.core.GetAutoGatherScheduleStatus())
+}
+
+func (s *Server) autoGatherScheduleSet(c echo.Context) error {
+	var req domain.AutoGatherScheduleSetRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid schedule request")
+	}
+	status, err := s.core.SetAutoGatherSchedule(req)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	return c.JSON(200, status)
 }
 
 func (s *Server) setTvLibraryPath(c echo.Context) error {
