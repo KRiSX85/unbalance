@@ -16,19 +16,14 @@ import {
   useAutoGatherScanning,
 } from '~/state/auto-gather';
 import { AutoGatherCanonicalPlanResult, AutoGatherControlledState, AutoGatherDryRunState, AutoGatherRealState, AutoGatherShow } from '~/types';
-import { bytesFromDecimalGB, formatByteBoundAsGB, humanBytes } from '~/helpers/units';
+import { bytesFromDecimalGB, humanBytes } from '~/helpers/units';
 import {
-  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
-  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE,
   autoGatherRealNonExecutableExplanation,
   autoGatherRealPermissionWarningMessage,
   canCancelAutoGatherRealPrepare,
   canConfirmAutoGatherRealMove,
   isAutoGatherControlledActivePhase,
   isAutoGatherControlledInterruptedPhase,
-  canAcknowledgeAutoGatherControlled,
-  canResetAutoGatherControlled,
-  shouldShowControlledStartControls,
   isAutoGatherRealExpiredPhase,
   isAutoGatherRealExecutionPhase,
   isAutoGatherStopEnabled,
@@ -37,6 +32,13 @@ import {
   shouldPollAutoGatherRealStatus,
   shouldShowAutoGatherRealConfirmPanel,
 } from '~/helpers/auto-gather-ui';
+import {
+  AutoGatherPageHeader,
+  ControlledAutoGatherCard,
+  ControlledInterruptedBanner,
+  DryRunAutoGatherCard,
+  OneShowGatherCard,
+} from '~/flows/auto-gather/auto-gather-operations';
 import { Icon } from '~/shared/icons/icon';
 import { Api } from '~/api';
 import { useUnraidActions } from '~/state/unraid';
@@ -326,10 +328,10 @@ const ShowRow: React.FunctionComponent<{
               )}
 
               <div className="mt-3 border-t border-slate-200 dark:border-gray-800 pt-3">
-                <div className="text-sm font-medium text-red-800 dark:text-red-300">
-                  Real Gather — ONE SHOW (Stage 3C)
+                <div className="text-sm font-medium text-slate-800 dark:text-gray-100">
+                  One-show Gather
                 </div>
-                <div className="text-xs text-red-700 dark:text-red-400 mt-1">
+                <div className="text-xs text-slate-600 dark:text-gray-400 mt-1">
                   Prepare inspects the move only. Confirmation is required before
                   any files are transferred or source data removed.
                 </div>
@@ -337,21 +339,20 @@ const ShowRow: React.FunctionComponent<{
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="mt-2 border-red-300 dark:border-red-700"
+                  className="mt-2"
                   disabled={preparingReal || realBusy || dryRunActive || !!opsBlocked}
                   onClick={() => onPrepareReal(show)}
                 >
-                  {preparingReal ? 'Preparing…' : 'Prepare real Gather'}
+                  {preparingReal ? 'Preparing…' : 'Prepare Gather'}
                 </Button>
               </div>
 
               <div className="mt-3 border-t border-slate-200 dark:border-gray-800 pt-3">
                 <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                  Canonical Gather verification (read-only)
+                  Gather plan verification (read-only)
                 </div>
                 <div className="text-xs text-slate-500 dark:text-gray-500 mt-1">
-                  Uses the real Gather planner for this show only. Estimated
-                  figures above remain Stage 2 advisory values. No move is
+                  Uses the real Gather planner for this show only. No move is
                   started.
                 </div>
                 <Button
@@ -372,7 +373,7 @@ const ShowRow: React.FunctionComponent<{
                 {canonical && !canonical.error && (
                   <div className="mt-2 space-y-1 text-sm text-slate-600 dark:text-gray-400">
                     <div>
-                      Stage 2 target still valid:{' '}
+                      Recommendation still valid:{' '}
                       <span className="font-medium text-slate-800 dark:text-gray-100">
                         {canonical.stage2TargetStillCanonicalEligible
                           ? 'Yes'
@@ -404,7 +405,7 @@ const ShowRow: React.FunctionComponent<{
                       )}
                     </div>
                     <div>
-                      Stage 2 estimated move:{' '}
+                      Estimated move (recommendation):{' '}
                       {humanBytes(canonical.stage2EstimatedMoveBytes || 0)}
                     </div>
                     {canonical.noEligibleReason && (
@@ -433,7 +434,7 @@ const ShowRow: React.FunctionComponent<{
                 {show.noEligibleReason ? ` ${show.noEligibleReason}` : ''}
               </div>
               <div className="text-sm font-medium text-slate-700 dark:text-slate-200">
-                Canonical Gather verification (read-only)
+                Gather plan verification (read-only)
               </div>
               <Button
                 type="button"
@@ -873,387 +874,65 @@ export const AutoGather: React.FunctionComponent = () => {
 
   return (
     <div className="flex flex-col h-full bg-neutral-100 dark:bg-gray-950">
-      <div className="p-4 border-b border-slate-200 dark:border-gray-800">
-        <h1 className="text-lg text-slate-800 dark:text-gray-100">
-          Auto Gather
-        </h1>
-        <p className="text-sm text-slate-500 dark:text-gray-500 mt-1">
-          Scan your TV library, review destination recommendations, and run
-          dry-run or confirmed real Gather moves. Global Dry Run is controlled
-          in Settings.
-        </p>
-
+      <AutoGatherPageHeader globalDryRun={globalDryRun}>
+        {controlledState &&
+          isAutoGatherControlledInterruptedPhase(controlledState.phase) && (
+            <ControlledInterruptedBanner
+              controlledState={controlledState}
+              controlledBusy={controlledBusy}
+              onAcknowledge={() => void onAcknowledgeControlled()}
+            />
+          )}
         <div
-          className={
-            globalDryRun
-              ? 'mt-3 rounded border border-lime-400 bg-lime-50 dark:bg-lime-950/30 dark:border-lime-700 px-3 py-2 text-sm text-lime-900 dark:text-lime-100'
-              : 'mt-3 rounded border border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-700 px-3 py-2 text-sm text-orange-900 dark:text-orange-100'
-          }
+          className={`grid gap-3 grid-cols-1 ${
+            globalDryRun ? 'md:grid-cols-2' : 'md:grid-cols-2 lg:grid-cols-3'
+          }`}
         >
-          <span className="font-semibold">
-            Global Dry Run: {globalDryRun ? 'On' : 'Off'}
-          </span>
-          <span className="mx-2">—</span>
-          {globalDryRun
-            ? AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE
-            : AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE}
-        </div>
-
-        <div className="mt-4 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3">
-          <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
-            Dry-run Auto Gather (Stage 3B — not a real move)
-          </div>
-          <p className="text-xs text-amber-800 dark:text-amber-300 mt-1">
-            One Stage 1 library scan at start, then each iteration refreshes
-            Unraid disk state, re-scores Stage 2 from the retained inventory,
-            canonical-plans only the selected show, and invokes Gather with{' '}
-            <code>--dry-run</code>. Dry-run does not change disk free space or
-            show placement, so free-space adaptation cannot be proven until
-            real moves.
-          </p>
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Button
-              variant="secondary"
-              disabled={!globalDryRun || dryRunBusy || dryRunActive || controlledInterrupted}
-              onClick={() => void onStartDryRun()}
-            >
-              Start dry run
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!stopEnabled}
-              onClick={() => void onStopDryRun()}
-            >
-              Stop
-            </Button>
-          </div>
+          <DryRunAutoGatherCard
+            globalDryRun={globalDryRun}
+            dryRunState={dryRunState}
+            dryRunPhase={dryRunPhase}
+            dryRunBusy={dryRunBusy}
+            dryRunActive={dryRunActive}
+            controlledInterrupted={controlledInterrupted}
+            stopEnabled={stopEnabled}
+            onStart={() => void onStartDryRun()}
+            onStop={() => void onStopDryRun()}
+          />
+          <OneShowGatherCard
+            globalDryRun={globalDryRun}
+            showConfirmPanel={showConfirmPanel}
+            preparedMove={preparedMove}
+            realState={realState}
+            realPhase={realPhase}
+            realExecutionActive={realExecutionActive}
+            isExpired={isAutoGatherRealExpiredPhase(realPhase)}
+            confirmEnabled={confirmEnabled}
+            cancelEnabled={cancelEnabled}
+            stopEnabled={stopEnabled}
+            permissionWarningMessage={permissionWarningMessage}
+            nonExecutableExplanation={nonExecutableExplanation}
+            onConfirm={() => void onConfirmRealExecute()}
+            onCancel={() => void onCancelPrepared()}
+            onStop={() => void onStopReal()}
+          />
           {!globalDryRun && (
-            <p className="text-xs text-amber-800 dark:text-amber-300 mt-2">
-              Enable global dry-run mode before starting Stage 3B.
-            </p>
+            <ControlledAutoGatherCard
+              controlledState={controlledState}
+              controlledBusy={controlledBusy}
+              controlledMaxShows={controlledMaxShows}
+              controlledMaxGB={controlledMaxGB}
+              realExecutionActive={realExecutionActive}
+              dryRunActive={dryRunActive}
+              onMaxShowsChange={setControlledMaxShows}
+              onMaxGBChange={setControlledMaxGB}
+              onStart={() => void onStartControlled()}
+              onStop={() => void onStopControlled()}
+              onReset={() => void onResetControlled()}
+            />
           )}
-          <div className="mt-3 text-sm text-amber-900 dark:text-amber-100 space-y-1">
-            <div>
-              Status: <span className="font-medium">{dryRunPhase}</span>
-            </div>
-            {(dryRunState?.currentShowName || dryRunState?.currentShow) && (
-              <div>
-                Current show:{' '}
-                {dryRunState?.currentShowName || dryRunState?.currentShow}
-                {dryRunState?.currentTarget
-                  ? ` → ${dryRunState.currentTarget}`
-                  : ''}
-              </div>
-            )}
-            <div>
-              Completed: {dryRunState?.completed?.length ?? 0}; Skipped:{' '}
-              {dryRunState?.skipped?.length ?? 0}
-              {typeof dryRunState?.splitRemaining === 'number' &&
-                `; Split remaining: ${dryRunState.splitRemaining}`}
-            </div>
-            {dryRunState?.failureReason && (
-              <div className="text-amber-800 dark:text-amber-300">
-                Failure
-                {dryRunState.failedShowName
-                  ? ` (${dryRunState.failedShowName})`
-                  : ''}
-                : {dryRunState.failureReason}
-              </div>
-            )}
-            {dryRunState?.message && (
-              <div className="text-xs text-amber-800 dark:text-amber-300">
-                {dryRunState.message}
-              </div>
-            )}
-          </div>
         </div>
-
-        <div className="mt-4 rounded border border-red-400 dark:border-red-800 bg-red-50 dark:bg-red-950/40 p-3">
-          <div className="text-sm font-semibold text-red-900 dark:text-red-200">
-            Real Gather — ONE SHOW (Stage 3C)
-          </div>
-          <p className="text-xs text-red-800 dark:text-red-300 mt-1">
-            This will move files and may remove successfully transferred source
-            files. Only the selected show will be processed. This is NOT a dry
-            run. Turn Global Dry Run Off in Settings before confirming a real
-            move.
-          </p>
-          {globalDryRun && (
-            <p className="text-xs text-red-800 dark:text-red-300 mt-2 font-medium">
-              {AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE}
-            </p>
-          )}
-          {preparedMove && showConfirmPanel && (
-            <div className="mt-3 rounded border border-red-300 dark:border-red-700 bg-white/70 dark:bg-gray-950/50 p-3 space-y-2 text-sm">
-              <div className="font-semibold text-red-900 dark:text-red-100">
-                Confirm real move (not a dry run)
-              </div>
-              <div>Show: {preparedMove.showName || preparedMove.showPath}</div>
-              <div>
-                Source disks: {(preparedMove.sourceDisks || []).join(', ') || 'none'}
-              </div>
-              <div>Destination: {preparedMove.canonicalTargetDisk}</div>
-              <div>
-                Bytes to move: {humanBytes(preparedMove.estimatedMoveBytes || 0)}
-              </div>
-              <div>
-                Projected target free:{' '}
-                {humanBytes(preparedMove.projectedTargetFreeBytes || 0)}
-              </div>
-              {permissionWarningMessage && (
-                <div className="font-medium text-amber-800 dark:text-amber-200">
-                  {permissionWarningMessage}
-                </div>
-              )}
-              {nonExecutableExplanation && (
-                <div className="font-medium text-red-800 dark:text-red-200">
-                  {nonExecutableExplanation}
-                </div>
-              )}
-              {(preparedMove.emptyFolderOnlyDisks?.length || 0) > 0 && (
-                <div className="text-xs">
-                  Empty-folder-only disks:{' '}
-                  {preparedMove.emptyFolderOnlyDisks!.join(', ')}
-                </div>
-              )}
-              <div className="flex flex-wrap gap-2 pt-2">
-                <Button
-                  variant="destructive"
-                  disabled={!confirmEnabled}
-                  onClick={() => void onConfirmRealExecute()}
-                >
-                  Confirm real Gather
-                </Button>
-                <Button
-                  variant="outline"
-                  disabled={realExecutionActive}
-                  onClick={() => void onCancelPrepared()}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </div>
-          )}
-          {isAutoGatherRealExpiredPhase(realPhase) && (
-            <div className="mt-3 rounded border border-red-300 dark:border-red-700 bg-white/70 dark:bg-gray-950/50 p-3 space-y-2 text-sm">
-              <div className="font-semibold text-red-900 dark:text-red-100">
-                Preparation expired
-              </div>
-              <div>
-                {realState?.error || 'preparation expired; prepare again'}
-              </div>
-              <Button
-                variant="outline"
-                disabled={!cancelEnabled || realExecutionActive}
-                onClick={() => void onCancelPrepared()}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Button
-              variant="outline"
-              className="border-red-300 dark:border-red-700"
-              disabled={!stopEnabled}
-              onClick={() => void onStopReal()}
-            >
-              Stop real move
-            </Button>
-          </div>
-          <div className="mt-3 text-sm text-red-900 dark:text-red-100 space-y-1">
-            <div>
-              Status: <span className="font-medium">{realPhase}</span>
-              {realState?.operationPhase
-                ? ` (${realState.operationPhase})`
-                : ''}
-            </div>
-            {(realState?.currentShowName || realState?.currentShow) && (
-              <div>
-                Current show:{' '}
-                {realState?.currentShowName || realState?.currentShow}
-                {realState?.currentTarget
-                  ? ` → ${realState.currentTarget}`
-                  : ''}
-              </div>
-            )}
-            {realState?.stoppedMessage && (
-              <div>{realState.stoppedMessage}</div>
-            )}
-            {realState?.error && <div>{realState.error}</div>}
-            {realState?.verification && realPhase !== 'prepared' && (
-              <div>
-                Verification: {realState.verification.message}
-                {(realState.verification.substantiveDisks?.length || 0) > 0 && (
-                  <> Remaining disks: {realState.verification.substantiveDisks!.join(', ')}</>
-                )}
-                {(realState.verification.emptyFolderRemnants?.length || 0) > 0 && (
-                  <> Empty-folder remnants: {realState.verification.emptyFolderRemnants!.join(', ')}</>
-                )}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Stage 3D: Controlled Real Auto Gather */}
-        {isAutoGatherControlledInterruptedPhase(controlledState?.phase) && (
-          <div className="mt-4 rounded border border-red-400 dark:border-red-700 bg-red-50 dark:bg-red-950/30 p-3 space-y-2">
-            <div className="font-semibold text-red-800 dark:text-red-200">
-              Previous real Auto Gather session was interrupted
-            </div>
-            <div className="text-sm text-red-800 dark:text-red-200">
-              {controlledState?.message}
-            </div>
-            {controlledState?.currentShowName && (
-              <div className="text-sm">
-                Last show: {controlledState.currentShowName}
-                {controlledState.currentTarget ? ` → ${controlledState.currentTarget}` : ''}
-              </div>
-            )}
-            {controlledState?.lastSourceEntry && (
-              <div className="text-sm">Last source entry: {controlledState.lastSourceEntry}</div>
-            )}
-            {controlledState?.rsyncProbe && (
-              <div className="text-sm">
-                Recorded rsync PID: {controlledState.rsyncProbe.pid || 'none'}.{' '}
-                {controlledState.rsyncProbe.note}
-              </div>
-            )}
-            {canAcknowledgeAutoGatherControlled(controlledState) ? (
-              <>
-                <div className="text-xs text-red-700 dark:text-red-300">
-                  Acknowledgement clears this warning only. It does not resume, retry, or kill any process.
-                </div>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  disabled={controlledBusy}
-                  onClick={() => void onAcknowledgeControlled()}
-                >
-                  I have verified the array — acknowledge interruption
-                </Button>
-              </>
-            ) : (
-              <div className="text-sm font-medium text-red-800 dark:text-red-200">
-                Acknowledgement is unavailable while the recorded rsync still appears to be running.
-                Wait for that process to finish or stop it yourself. Unbalanced will not kill it.
-              </div>
-            )}
-          </div>
-        )}
-        {!globalDryRun && (
-          <div className="mt-4 rounded border border-orange-300 dark:border-orange-700 bg-orange-50/50 dark:bg-orange-950/20 p-3 space-y-2">
-            <div className="font-semibold text-orange-900 dark:text-orange-100">
-              Controlled Real Auto Gather (Stage 3D)
-              {controlledState?.trigger === 'scheduled' ? ' — Scheduled' : ''}
-            </div>
-            <div className="text-xs text-orange-800 dark:text-orange-200">
-              Orchestrates multiple one-show real Gather moves sequentially.
-              This is NOT a dry run — files will be moved and successfully transferred sources removed.
-              {controlledState?.trigger === 'scheduled'
-                ? ' This session was started by the scheduler.'
-                : ''}
-            </div>
-            {shouldShowControlledStartControls(controlledState?.phase) && (
-              <div className="flex flex-wrap items-center gap-2">
-                <label className="text-sm">Max shows:</label>
-                <Input
-                  className="w-20"
-                  type="number"
-                  min={1}
-                  max={50}
-                  value={controlledMaxShows}
-                  onChange={(e) => setControlledMaxShows(Math.max(1, parseInt(e.target.value) || 1))}
-                />
-                <label className="text-sm">Max GB:</label>
-                <Input
-                  className="w-24"
-                  type="number"
-                  min={1}
-                  value={controlledMaxGB}
-                  onChange={(e) => setControlledMaxGB(Math.max(1, parseInt(e.target.value) || 1))}
-                />
-                <Button
-                  variant="destructive"
-                  disabled={controlledBusy || realExecutionActive || dryRunActive}
-                  onClick={() => void onStartControlled()}
-                >
-                  Start controlled real Auto Gather
-                </Button>
-              </div>
-            )}
-            {controlledState && controlledState.phase !== 'idle' && controlledState.phase !== 'interrupted' && (
-              <div className="text-sm space-y-1">
-                <div>
-                  Phase: <span className="font-medium">{controlledState.phase}</span>
-                  {controlledState.operationPhase ? ` (${controlledState.operationPhase})` : ''}
-                </div>
-                <div>
-                  Bounds: {controlledState.maxShows} shows / {formatByteBoundAsGB(controlledState.maxBytes)}
-                </div>
-                <div>
-                  Completed: {(controlledState.completed?.length || 0)} shows;{' '}
-                  {humanBytes(controlledState.cumulativeBytes || 0)} moved
-                </div>
-                {(controlledState.completed?.length || 0) > 0 && (
-                  <ul className="list-disc pl-5 text-xs">
-                    {controlledState.completed!.map((item) => (
-                      <li key={item.showPath}>
-                        {item.showName || item.showPath}
-                        {item.targetDisk ? ` → ${item.targetDisk}` : ''}
-                        {item.moveBytes ? ` (${humanBytes(item.moveBytes)})` : ''}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                {(controlledState.skipped?.length || 0) > 0 && (
-                  <div>Skipped: {controlledState.skipped!.length}</div>
-                )}
-                {controlledState.currentShowName && (
-                  <div>
-                    Current: {controlledState.currentShowName}
-                    {controlledState.currentTarget ? ` → ${controlledState.currentTarget}` : ''}
-                  </div>
-                )}
-                {controlledState.failureReason && (
-                  <div className="text-red-700 dark:text-red-300">
-                    Failed: {controlledState.failedShowName || controlledState.failedShow} — {controlledState.failureReason}
-                  </div>
-                )}
-                {controlledState.error && (
-                  <div className="text-red-700 dark:text-red-300">{controlledState.error}</div>
-                )}
-                {isAutoGatherControlledActivePhase(controlledState.phase) && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    disabled={controlledBusy}
-                    onClick={() => void onStopControlled()}
-                  >
-                    Stop controlled Auto Gather
-                  </Button>
-                )}
-                {canResetAutoGatherControlled(controlledState) && (
-                  <div className="pt-2 space-y-1">
-                    <div className="text-xs text-orange-800 dark:text-orange-200">
-                      Session finished. Start another requires a fresh confirmation; nothing starts automatically.
-                    </div>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      disabled={controlledBusy || realExecutionActive || dryRunActive}
-                      onClick={() => void onResetControlled()}
-                    >
-                      New controlled session
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        <div className="flex flex-row flex-wrap items-center gap-2 mt-4">
+        <div className="flex flex-row flex-wrap items-center gap-2 pt-1">
           <span className="text-sm text-slate-500 dark:text-gray-500">
             /mnt/user/
           </span>
@@ -1282,11 +961,11 @@ export const AutoGather: React.FunctionComponent = () => {
             />
           )}
         </div>
-        <p className="text-xs text-slate-500 dark:text-gray-500 mt-2">
+        <p className="text-xs text-slate-500 dark:text-gray-500">
           Scan uses the last saved path ({tvLibraryPath || 'data/media/tv'}).
           Save path before scanning if you change it.
         </p>
-      </div>
+      </AutoGatherPageHeader>
 
       {(error || result?.error) && (
         <div className="px-4 py-2 text-sm text-red-600 dark:text-red-400">

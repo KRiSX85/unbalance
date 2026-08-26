@@ -1,10 +1,26 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { AutoGatherRealState, AutoGatherShow, Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE,
+  AUTO_GATHER_PAGE_DESCRIPTION,
+  AUTO_GATHER_DRY_RUN_CARD_DESCRIPTION,
+  AUTO_GATHER_DRY_RUN_OFF_HINT,
+  AUTO_GATHER_ONE_SHOW_HINT,
+  AUTO_GATHER_CONTROLLED_DESCRIPTION,
+  AUTO_GATHER_FORBIDDEN_USER_TERMS,
+  autoGatherUserFacingTextAllowed,
+  controlledTriggerLabel,
+  controlledResultLabel,
+  formatControlledRunTimestamp,
+  shouldShowControlledLastRunSummary,
+  shouldShowControlledActivePanel,
+  shouldShowOneShowConfirmOrStatus,
+  isAutoGatherControlledActivePhase,
   autoGatherRealNonExecutableExplanation,
   autoGatherRealPermissionWarningMessage,
   headerShowsBusy,
@@ -522,5 +538,117 @@ describe('Auto Gather Stage 3D library snapshot apply', () => {
     const normalized = normalizeAutoGatherShow(raw);
     expect(normalized.videoDisks.filter(() => true)).toEqual([]);
     expect(normalized.cachePoolsWithVideo.length).toBe(0);
+  });
+});
+
+describe('Auto Gather UI polish — user-facing copy', () => {
+  const copyStrings = [
+    AUTO_GATHER_PAGE_DESCRIPTION,
+    AUTO_GATHER_DRY_RUN_CARD_DESCRIPTION,
+    AUTO_GATHER_DRY_RUN_OFF_HINT,
+    AUTO_GATHER_ONE_SHOW_HINT,
+    AUTO_GATHER_CONTROLLED_DESCRIPTION,
+    AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
+    AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE,
+  ];
+
+  it('keeps product copy free of internal stage labels', () => {
+    for (const text of copyStrings) {
+      expect(autoGatherUserFacingTextAllowed(text)).toBe(true);
+    }
+  });
+
+  it('does not expose stage labels in Auto Gather UI sources', () => {
+    const uiSources = [
+      '../flows/auto-gather/auto-gather.tsx',
+      '../flows/auto-gather/auto-gather-operations.tsx',
+      '../flows/settings/schedule.tsx',
+    ];
+    for (const rel of uiSources) {
+      const content = readFileSync(resolve(__dirname, rel), 'utf8');
+      for (const term of AUTO_GATHER_FORBIDDEN_USER_TERMS) {
+        expect(content, `${rel} must not contain "${term}"`).not.toContain(term);
+      }
+    }
+  });
+});
+
+describe('Auto Gather UI polish — controlled presentation', () => {
+  it('labels scheduled vs manual triggers for badges', () => {
+    expect(controlledTriggerLabel('scheduled')).toBe('Scheduled');
+    expect(controlledTriggerLabel('manual')).toBe('Manual');
+    expect(controlledTriggerLabel(undefined)).toBe('Manual');
+  });
+
+  it('maps controlled phases to concise result labels', () => {
+    expect(controlledResultLabel('completed')).toBe('Completed');
+    expect(controlledResultLabel('stopped')).toBe('Stopped');
+    expect(controlledResultLabel('failed')).toBe('Failed');
+    expect(controlledResultLabel('running')).toBe('Running');
+    expect(controlledResultLabel('stopping')).toBe('Stopping');
+  });
+
+  it('formats controlled run timestamps for last-run summaries', () => {
+    const formatted = formatControlledRunTimestamp('2026-08-27T03:00:00Z');
+    expect(formatted).toContain('2026');
+    expect(formatted.length).toBeGreaterThan(8);
+  });
+
+  it('shows last-run summary only for terminal controlled sessions', () => {
+    expect(shouldShowControlledLastRunSummary({ phase: 'completed' })).toBe(true);
+    expect(shouldShowControlledLastRunSummary({ phase: 'stopped' })).toBe(true);
+    expect(shouldShowControlledLastRunSummary({ phase: 'failed' })).toBe(true);
+    expect(shouldShowControlledLastRunSummary({ phase: 'running' })).toBe(false);
+    expect(shouldShowControlledLastRunSummary({ phase: 'interrupted' })).toBe(false);
+    expect(shouldShowControlledLastRunSummary({ phase: 'idle' })).toBe(false);
+  });
+
+  it('shows active controlled panel only while running or stopping', () => {
+    expect(shouldShowControlledActivePanel('running')).toBe(true);
+    expect(shouldShowControlledActivePanel('stopping')).toBe(true);
+    expect(shouldShowControlledActivePanel('completed')).toBe(false);
+    expect(isAutoGatherControlledActivePhase('running')).toBe(true);
+  });
+
+  it('gates one-show page card visibility for confirm, execution, and expiry', () => {
+    expect(
+      shouldShowOneShowConfirmOrStatus({
+        showConfirmPanel: true,
+        realPhase: 'prepared',
+        realExecutionActive: false,
+        isExpired: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowOneShowConfirmOrStatus({
+        showConfirmPanel: false,
+        realPhase: 'executing',
+        realExecutionActive: true,
+        isExpired: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowOneShowConfirmOrStatus({
+        showConfirmPanel: false,
+        realPhase: 'idle',
+        realExecutionActive: false,
+        isExpired: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowOneShowConfirmOrStatus({
+        showConfirmPanel: false,
+        realPhase: 'expired',
+        realExecutionActive: false,
+        isExpired: true,
+      }),
+    ).toBe(true);
+  });
+
+  it('offers reset after clean terminal phases only', () => {
+    expect(canResetAutoGatherControlled({ phase: 'completed' })).toBe(true);
+    expect(canResetAutoGatherControlled({ phase: 'interrupted' })).toBe(false);
+    expect(shouldShowControlledStartControls('idle')).toBe(true);
+    expect(shouldShowControlledStartControls('completed')).toBe(false);
   });
 });

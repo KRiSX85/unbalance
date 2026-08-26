@@ -55,10 +55,10 @@ export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
 }
 
 export const AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE =
-  'Global Dry Run is On. Real Auto Gather moves are disabled. Turn Global Dry Run Off in Settings → Global Dry Run to enable real transfers (with confirmation).';
+  'Global Dry Run is On — real Auto Gather moves are disabled. Turn it Off in Settings → Global Dry Run to enable real transfers (with confirmation).';
 
 export const AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE =
-  'Global Dry Run is Off. Real transfers are enabled after the normal confirmations. Successfully transferred sources may be removed.';
+  'Global Dry Run is Off — real transfers are enabled after the usual confirmations. Successfully transferred sources may be removed.';
 
 export function isAutoGatherRealPrepareExpired(
   expiresAt?: string | null,
@@ -319,3 +319,99 @@ export function shouldReplacePageWithScatterGatherOperation(
   }
   return status !== Op.Neutral;
 }
+
+/** User-facing strings must not expose internal stage labels (3B/3C/3D). */
+export const AUTO_GATHER_FORBIDDEN_USER_TERMS = [
+  'Stage 3B',
+  'Stage 3C',
+  'Stage 3D',
+  'Stage 3b',
+  'Stage 3c',
+  'Stage 3d',
+  'Stage 1',
+  'Stage 2',
+] as const;
+
+export function autoGatherUserFacingTextAllowed(text: string): boolean {
+  const lower = text.toLowerCase();
+  return !AUTO_GATHER_FORBIDDEN_USER_TERMS.some((term) =>
+    lower.includes(term.toLowerCase()),
+  );
+}
+
+export function controlledTriggerLabel(trigger?: string | null): 'Scheduled' | 'Manual' {
+  return trigger === 'scheduled' ? 'Scheduled' : 'Manual';
+}
+
+export function controlledResultLabel(phase?: string | null): string {
+  switch (phase) {
+    case 'completed':
+      return 'Completed';
+    case 'stopped':
+      return 'Stopped';
+    case 'failed':
+      return 'Failed';
+    case 'running':
+      return 'Running';
+    case 'stopping':
+      return 'Stopping';
+    default:
+      return phase ? phase.charAt(0).toUpperCase() + phase.slice(1) : 'Unknown';
+  }
+}
+
+export function formatControlledRunTimestamp(startedAt?: string | null): string {
+  if (!startedAt) {
+    return '';
+  }
+  const parsed = Date.parse(startedAt);
+  if (Number.isNaN(parsed)) {
+    return startedAt;
+  }
+  return new Date(parsed).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+}
+
+export function shouldShowControlledLastRunSummary(
+  state?: { phase?: string } | null,
+): boolean {
+  return canResetAutoGatherControlled(state);
+}
+
+export function shouldShowControlledActivePanel(phase?: string | null): boolean {
+  return isAutoGatherControlledActivePhase(phase);
+}
+
+export function shouldShowOneShowConfirmOrStatus(opts: {
+  showConfirmPanel: boolean;
+  realPhase?: string | null;
+  realExecutionActive: boolean;
+  isExpired: boolean;
+}): boolean {
+  return (
+    opts.showConfirmPanel ||
+    opts.realExecutionActive ||
+    opts.isExpired ||
+    (opts.realPhase != null &&
+      opts.realPhase !== 'idle' &&
+      !opts.isExpired &&
+      !opts.showConfirmPanel)
+  );
+}
+
+export const AUTO_GATHER_PAGE_DESCRIPTION =
+  'Scan your TV library, review consolidation recommendations, and run manual or controlled Auto Gather operations.';
+
+export const AUTO_GATHER_DRY_RUN_CARD_DESCRIPTION =
+  'Preview consolidation plans without moving or deleting files.';
+
+export const AUTO_GATHER_DRY_RUN_OFF_HINT =
+  'Enable Global Dry Run in Settings to run a dry-run preview.';
+
+export const AUTO_GATHER_ONE_SHOW_HINT =
+  'Individual shows can be prepared and gathered from the library results below.';
+
+export const AUTO_GATHER_CONTROLLED_DESCRIPTION =
+  'Consolidate multiple shows sequentially using the limits below.';

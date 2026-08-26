@@ -161,9 +161,8 @@ export const Schedule: React.FunctionComponent = () => {
     <div className="p-4 max-w-3xl space-y-4">
       <h1 className="text-xl font-bold">Scheduled Auto Gather</h1>
       <p className="text-sm text-gray-700 dark:text-gray-300">
-        Automatically starts the existing controlled real Auto Gather (Stage 3D)
-        at configured server-local times. Times use the Unraid server clock — not
-        your browser timezone.
+        Automatically starts Controlled Auto Gather at configured server-local
+        times. Times use the Unraid server clock — not your browser timezone.
       </p>
 
       {status && (
