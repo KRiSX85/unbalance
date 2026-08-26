@@ -6,7 +6,7 @@ _tl;dr_ **unbalanced** is an [Unraid](https://unraid.net/) plugin to transfer fi
 
 If you wish to do so, read how to [support the developer](https://jbrio.net/unbalanced).
 
-## [Changelog](https://github.com/jbrodriguez/unbalance/releases)
+## [Changelog](https://github.com/KRiSX85/unbalance/releases)
 
 ## Screenshot
 
@@ -136,7 +136,7 @@ There are 2 ways to install this application
   unbalanced<br/> Click Install
 
 - Plugins Tab (manual)<br/> Go to the Plugins tab<br/> Click on Install Plugin<br/> Paste the following address in the
-  input field: <https://github.com/jbrodriguez/unbalance/releases/latest/download/unbalanced.plg><br/> Click Install
+  input field: <https://github.com/KRiSX85/unbalance/releases/latest/download/unbalanced.plg><br/> Click Install
 
 ## Running the app
 

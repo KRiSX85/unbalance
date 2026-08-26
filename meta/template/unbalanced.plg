@@ -5,7 +5,7 @@
 <!ENTITY author      "Juan B. Rodriguez">
 <!ENTITY version     "##version##">
 <!ENTITY launch      "Settings/&name;">
-<!ENTITY pluginURL   "https://github.com/jbrodriguez/unbalance/releases/latest/download/&name;.plg">
+<!ENTITY pluginURL   "https://github.com/KRiSX85/unbalance/releases/latest/download/&name;.plg">
 <!ENTITY bundle      "&name;-&version;.tgz">
 <!ENTITY md5         "##md5##">
 ]>
@@ -29,7 +29,7 @@ The plugin frees up space from a disk array in unRAID systems.
 Get the unbalanced bundle.
 -->
 <FILE Name="/boot/config/plugins/&name;/&bundle;">
-<URL>"https://github.com/jbrodriguez/unbalance/releases/download/&version;/&bundle;"</URL>
+<URL>"https://github.com/KRiSX85/unbalance/releases/download/&version;/&bundle;"</URL>
 <MD5>&md5;</MD5>
 </FILE>
 

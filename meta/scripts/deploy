@@ -8,6 +8,7 @@ set -u
 patch="${1:-}"
 
 name="unbalanced"
+repo_root=$(pwd)
 
 # Get the current date in the specified format
 version=$(date '+%Y.%m.%d')
@@ -18,41 +19,162 @@ version=$(date '+%Y.%m.%d')
 cd ui && npm run build && cd ..
 
 go build fmt
-env CGO_ENABLED=0 go build -ldflags "-X main.Version=$version$patch" -v -o meta/plugin/$name
+# Always build the Unraid plugin binary for linux/amd64 (safe on GitHub Actions and macOS).
+env CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=$version$patch" -v -o meta/plugin/$name
 
 echo "$version$patch" >meta/plugin/VERSION
 
 cd meta
 mv plugin unbalanced
-tar --owner=root --group=root -czvf ../$name-$version$patch.tgz unbalanced
+
+# If packaging fails after the rename, restore meta/plugin for a usable tree.
+restore_plugin_dir() {
+	if [ -d "$repo_root/meta/unbalanced" ] && [ ! -d "$repo_root/meta/plugin" ]; then
+		mv "$repo_root/meta/unbalanced" "$repo_root/meta/plugin"
+	fi
+}
+trap restore_plugin_dir EXIT
+
+# Prevent macOS AppleDouble / xattr / provenance metadata from entering release
+# archives. COPYFILE_DISABLE is a no-op on Linux/GitHub Actions.
+#
+# Do not rely on `tar --help` for option detection: macOS bsdtar supports
+# --no-xattrs / --no-mac-metadata but omits them from --help. Probe by asking
+# tar to accept the options instead. GNU tar on Linux rejects them and we skip.
+export COPYFILE_DISABLE=1
+tar_flags=(--owner=root --group=root)
+if tar --owner=root --group=root --no-xattrs --no-mac-metadata -cf /dev/null --files-from=/dev/null 2>/dev/null; then
+	tar_flags+=(--no-xattrs --no-mac-metadata)
+fi
+# Belt-and-suspenders on macOS: clear extended attributes from the package tree
+# before archiving (xattr is unavailable on typical Linux runners).
+if command -v xattr >/dev/null 2>&1; then
+	xattr -cr unbalanced 2>/dev/null || true
+fi
+
+tar_err=$(mktemp)
+if ! tar "${tar_flags[@]}" -czvf ../$name-$version$patch.tgz unbalanced 2>"$tar_err"; then
+	cat "$tar_err" >&2
+	rm -f "$tar_err"
+	exit 1
+fi
+if grep -E 'LIBARCHIVE\.xattr|com\.apple\.provenance|AppleDouble|\._' "$tar_err" >/dev/null; then
+	echo "ERROR: tar reported macOS metadata while creating archive:" >&2
+	cat "$tar_err" >&2
+	rm -f "$tar_err"
+	exit 1
+fi
+# Still show normal tar member listing progress (bsdtar -v writes to stderr).
+cat "$tar_err"
+rm -f "$tar_err"
 cd ..
 
+archive="$name-$version$patch.tgz"
+
+# Lightweight archive verification: only intended plugin members, no AppleDouble.
+expected_members=(
+	"unbalanced/"
+	"unbalanced/README.md"
+	"unbalanced/VERSION"
+	"unbalanced/event/"
+	"unbalanced/event/started"
+	"unbalanced/event/stopping_svcs"
+	"unbalanced/scripts/"
+	"unbalanced/scripts/start"
+	"unbalanced/scripts/stop"
+	"unbalanced/unbalanced"
+	"unbalanced/unbalanced.page"
+	"unbalanced/unbalanced.png"
+)
+actual_members=$(tar -tzf "$archive" | LC_ALL=C sort)
+expected_sorted=$(printf '%s\n' "${expected_members[@]}" | LC_ALL=C sort)
+if [ "$actual_members" != "$expected_sorted" ]; then
+	echo "ERROR: archive member list does not match expected plugin layout:" >&2
+	echo "--- actual ---" >&2
+	echo "$actual_members" >&2
+	echo "--- expected ---" >&2
+	echo "$expected_sorted" >&2
+	exit 1
+fi
+if tar -tvf "$archive" 2>&1 | grep -E 'LIBARCHIVE\.xattr|com\.apple\.provenance|\._|AppleDouble|\.DS_Store' >/dev/null; then
+	echo "ERROR: archive appears to contain macOS xattr/AppleDouble metadata" >&2
+	tar -tvf "$archive" >&2
+	exit 1
+fi
+# tar -tvf does not surface embedded pax xattr headers; inspect them when python3 exists.
+if command -v python3 >/dev/null 2>&1; then
+	python3 - "$archive" <<'PY'
+import sys
+import tarfile
+
+archive = sys.argv[1]
+hits = []
+with tarfile.open(archive, "r:gz") as tar:
+    for member in tar.getmembers():
+        for key in (member.pax_headers or {}):
+            lower = key.lower()
+            if "xattr" in lower or "apple" in lower or key.startswith("LIBARCHIVE.xattr") or key.startswith("SCHILY.xattr"):
+                hits.append(f"{member.name}: {key}")
+
+if hits:
+    print("ERROR: archive contains extended-attribute pax headers:", file=sys.stderr)
+    for hit in hits:
+        print(f"  {hit}", file=sys.stderr)
+    sys.exit(1)
+PY
+fi
+
 # Calculate the MD5 checksum for the plugin
-md5=$(md5sum $name-$version$patch.tgz | awk '{print $1}')
+md5=$(md5sum $archive | awk '{print $1}')
 
-# Get the latest git tag
-latest_tag=$(git describe --tags --abbrev=0)
+# Restore plugin directory name so local dry-runs do not leave meta/unbalanced behind.
+mv meta/unbalanced meta/plugin
+trap - EXIT
 
-# Generate the changelog since the latest tag
-changes=$(git log --oneline $latest_tag..HEAD --pretty="- %s")
+# Changelog: optional curated notes file, otherwise commits since latest tag.
+# Notes are applied via a temp file so multi-line content is preserved
+# (awk -v truncates at the first newline).
+changes_file=$(mktemp)
+cleanup_changes() { rm -f "$changes_file"; }
+trap cleanup_changes EXIT
+if [ -n "${RELEASE_NOTES_FILE:-}" ] && [ -f "$RELEASE_NOTES_FILE" ]; then
+	cat "$RELEASE_NOTES_FILE" >"$changes_file"
+else
+	latest_tag=$(git describe --tags --abbrev=0)
+	git log --oneline "$latest_tag"..HEAD --pretty="- %s" >"$changes_file"
+fi
 
-# Use awk for replacements and generate plugin file
-awk -v version="$version$patch" -v md5="$md5" -v changes="$changes" '
+awk -v version="$version$patch" -v md5="$md5" -v changes_file="$changes_file" '
+  BEGIN {
+    while ((getline line < changes_file) > 0) {
+      changes = changes line "\n"
+    }
+    close(changes_file)
+  }
   {
     gsub(/##version##/, version);
     gsub(/##md5##/, md5);
-    gsub(/##changes##/, changes);
+    if (index($0, "##changes##") != 0) {
+      sub(/##changes##/, changes);
+      printf "%s", $0;
+      next
+    }
     print $0;
   }
 ' meta/template/$name.plg >$name.plg
 
+# Optional local packaging dry-run (skip GitHub release publish)
+if [ "${SKIP_RELEASE:-}" = "1" ]; then
+	echo "SKIP_RELEASE=1: built $archive and $name.plg (version $version$patch); not publishing."
+	exit 0
+fi
+
 # release the plugin
 # Create a release with the tag name
-gh release create $version$patch -n "$changes"
+gh release create "$version$patch" -F "$changes_file"
 
 # Upload the TGZ artifact
-gh release upload $version$patch ./$name-$version$patch.tgz --clobber
+gh release upload "$version$patch" ./"$archive" --clobber
 
 # Upload the XML artifact
-gh release upload $version$patch ./$name.plg --clobber
-
+gh release upload "$version$patch" ./"$name.plg" --clobber
