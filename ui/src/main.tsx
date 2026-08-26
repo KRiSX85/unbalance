@@ -21,6 +21,7 @@ import { AutoGather } from '~/flows/auto-gather/auto-gather';
 import { History } from '~/flows/history/history';
 import { Settings } from '~/flows/settings/settings';
 import { Notifications } from '~/flows/settings/notifications';
+import { DryRun } from '~/flows/settings/dry-run';
 import { Reserved } from '~/flows/settings/reserved';
 import { Flags } from '~/flows/settings/flags';
 import { Verbosity } from '~/flows/settings/verbosity';
@@ -123,7 +124,11 @@ const router = createBrowserRouter([
             children: [
               {
                 index: true,
-                element: <Navigate to="/settings/notifications" replace />,
+                element: <Navigate to="/settings/dry-run" replace />,
+              },
+              {
+                path: 'dry-run',
+                element: <DryRun />,
               },
               {
                 path: 'notifications',

@@ -24,7 +24,7 @@ const config = [
 export const Navbar: React.FunctionComponent = () => {
   const route = useUnraidRoute();
   const { transition, scatterOperation } = useUnraidActions();
-  const { toggleDryRun } = useConfigActions();
+  const { setDryRun } = useConfigActions();
   const dryRun = useConfigDryRun();
   const selected = useScatterSelected();
   const targets = useScatterTargets();
@@ -34,8 +34,24 @@ export const Navbar: React.FunctionComponent = () => {
   const onPrev = () => transition('prev');
   const onMove = () => scatterOperation(Topic.CommandScatterMove);
   const onCopy = () => scatterOperation(Topic.CommandScatterCopy);
-  const onDryRun = () => toggleDryRun();
-
+  const onDryRun = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.checked;
+    if (!next) {
+      const ok = window.confirm(
+        'Turn Global Dry Run Off?\n\nReal Scatter transfers can move or copy files. For MOVE, successfully transferred source files may be removed.',
+      );
+      if (!ok) {
+        return;
+      }
+    }
+    try {
+      await setDryRun(next, !next);
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : 'Unable to update Global Dry Run',
+      );
+    }
+  };
   const currentStep = routeToStep(route);
   const nextDisabled =
     busy ||

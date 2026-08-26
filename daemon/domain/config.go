@@ -17,3 +17,10 @@ type Config struct {
 	AuthUsername   string   `json:"authUsername"`
 	AuthPassword   string   `json:"-"`
 }
+
+// SetDryRunRequest updates the persisted/runtime global dry-run switch.
+// Setting DryRun=false (enabling real transfers) requires Confirm=true.
+type SetDryRunRequest struct {
+	DryRun  bool `json:"dryRun"`
+	Confirm bool `json:"confirm"`
+}

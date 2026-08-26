@@ -1,4 +1,4 @@
-import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState } from '~/types';
+import { State, Op, Branch, AuthStatus, Sizes, AutoGatherScanResult, AutoGatherCanonicalPlanResult, AutoGatherDryRunState, AutoGatherRealPrepareResult, AutoGatherRealState, AutoGatherControlledState, Config } from '~/types';
 
 export class Api {
   static host = `${document.location.protocol}//${document.location.host}/api`;
@@ -394,17 +394,27 @@ export class Api {
     }
   }
 
-  static async toggleDryRun(): Promise<void> {
+  static async setDryRun(dryRun: boolean, confirm: boolean): Promise<Config> {
     const options = {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', ...Api.authHeaders() },
+      body: JSON.stringify({ dryRun, confirm }),
     };
-    try {
-      const url = `${Api.host}/config/dryRun`;
-      await fetch(url, options);
-    } catch (e) {
-      console.log('toggleDryRun() error: ', e);
+    const url = `${Api.host}/config/dryRun`;
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      let message = `Unable to update Global Dry Run (${response.status})`;
+      try {
+        const body = await response.json();
+        if (body?.message) {
+          message = String(body.message);
+        }
+      } catch {
+        // keep default message
+      }
+      throw new Error(message);
     }
+    return response.json();
   }
 
   static async setNotifyPlan(value: number): Promise<void> {

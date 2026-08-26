@@ -55,7 +55,10 @@ export function isAutoGatherTerminalPhase(phase?: string | null): boolean {
 }
 
 export const AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE =
-  'Global dry-run is enabled. Real execution is disabled until global dry-run mode is turned off.';
+  'Global Dry Run is On. Real Auto Gather moves are disabled. Turn Global Dry Run Off in Settings → Global Dry Run to enable real transfers (with confirmation).';
+
+export const AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE =
+  'Global Dry Run is Off. Real transfers are enabled after the normal confirmations. Successfully transferred sources may be removed.';
 
 export function isAutoGatherRealPrepareExpired(
   expiresAt?: string | null,

@@ -4,6 +4,7 @@ import { AutoGatherRealState, AutoGatherShow, Op } from '~/types';
 import { getRouteFromStatus } from '~/helpers/routes';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
+  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE,
   autoGatherRealNonExecutableExplanation,
   autoGatherRealPermissionWarningMessage,
   headerShowsBusy,
@@ -144,12 +145,15 @@ function preparedStatus(
 }
 
 describe('Auto Gather Stage 3C dry-run wording', () => {
-  it('does not tell the user to disable global dry-run in Settings', () => {
-    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE).toBe(
-      'Global dry-run is enabled. Real execution is disabled until global dry-run mode is turned off.',
-    );
-    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE.toLowerCase()).not.toContain(
+  it('points operators to Settings → Global Dry Run when real moves are blocked', () => {
+    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE.toLowerCase()).toContain(
       'settings',
+    );
+    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE.toLowerCase()).toContain(
+      'global dry run',
+    );
+    expect(AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE.toLowerCase()).toContain(
+      'off',
     );
   });
 });

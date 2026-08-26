@@ -19,6 +19,7 @@ import { AutoGatherCanonicalPlanResult, AutoGatherControlledState, AutoGatherDry
 import { bytesFromDecimalGB, formatByteBoundAsGB, humanBytes } from '~/helpers/units';
 import {
   AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE,
+  AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE,
   autoGatherRealNonExecutableExplanation,
   autoGatherRealPermissionWarningMessage,
   canCancelAutoGatherRealPrepare,
@@ -876,10 +877,26 @@ export const AutoGather: React.FunctionComponent = () => {
           Auto Gather
         </h1>
         <p className="text-sm text-slate-500 dark:text-gray-500 mt-1">
-          Read-only scan and destination recommendations. Stage 3B dry-run
-          orchestration exercises Gather planning without transferring or
-          deleting files.
+          Scan your TV library, review destination recommendations, and run
+          dry-run or confirmed real Gather moves. Global Dry Run is controlled
+          in Settings.
         </p>
+
+        <div
+          className={
+            globalDryRun
+              ? 'mt-3 rounded border border-lime-400 bg-lime-50 dark:bg-lime-950/30 dark:border-lime-700 px-3 py-2 text-sm text-lime-900 dark:text-lime-100'
+              : 'mt-3 rounded border border-orange-400 bg-orange-50 dark:bg-orange-950/30 dark:border-orange-700 px-3 py-2 text-sm text-orange-900 dark:text-orange-100'
+          }
+        >
+          <span className="font-semibold">
+            Global Dry Run: {globalDryRun ? 'On' : 'Off'}
+          </span>
+          <span className="mx-2">—</span>
+          {globalDryRun
+            ? AUTO_GATHER_REAL_GLOBAL_DRY_RUN_MESSAGE
+            : AUTO_GATHER_REAL_GLOBAL_DRY_RUN_OFF_MESSAGE}
+        </div>
 
         <div className="mt-4 rounded border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 p-3">
           <div className="text-sm font-semibold text-amber-900 dark:text-amber-200">
@@ -957,7 +974,8 @@ export const AutoGather: React.FunctionComponent = () => {
           <p className="text-xs text-red-800 dark:text-red-300 mt-1">
             This will move files and may remove successfully transferred source
             files. Only the selected show will be processed. This is NOT a dry
-            run. Disable global dry-run mode before confirming a real move.
+            run. Turn Global Dry Run Off in Settings before confirming a real
+            move.
           </p>
           {globalDryRun && (
             <p className="text-xs text-red-800 dark:text-red-300 mt-2 font-medium">

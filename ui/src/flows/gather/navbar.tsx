@@ -28,7 +28,7 @@ export const Navbar: React.FunctionComponent = () => {
   const route = useUnraidRoute();
   const { transition, gatherMove } = useUnraidActions();
   const target = useGatherTarget();
-  const { toggleDryRun } = useConfigActions();
+  const { setDryRun } = useConfigActions();
   const dryRun = useConfigDryRun();
   const busy = useUnraidIsBusy();
   const selected = useGatherSelected();
@@ -36,8 +36,24 @@ export const Navbar: React.FunctionComponent = () => {
   const onNext = () => transition('next');
   const onPrev = () => transition('prev');
   const onMove = () => gatherMove();
-  const onDryRun = () => toggleDryRun();
-
+  const onDryRun = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const next = e.target.checked;
+    if (!next) {
+      const ok = window.confirm(
+        'Turn Global Dry Run Off?\n\nReal Gather transfers can move files and remove successfully transferred source files.',
+      );
+      if (!ok) {
+        return;
+      }
+    }
+    try {
+      await setDryRun(next, !next);
+    } catch (err) {
+      window.alert(
+        err instanceof Error ? err.message : 'Unable to update Global Dry Run',
+      );
+    }
+  };
   const currentStep = routeToStep(route);
   const nextDisabled =
     busy ||

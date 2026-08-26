@@ -172,7 +172,7 @@ func LoadAuthHash(location string) (string, error) {
 //
 // Precedence for DRY_RUN and other persisted keys:
 //  1. unbalanced.env in the resolved data directory, when the key is present
-//     and parseable. This is the runtime source of truth (ToggleDryRun writes it).
+//     and parseable. This is the runtime source of truth (SetDryRun writes it).
 //  2. Kong process environment (env:"DRY_RUN") and CLI, used only as the
 //     initial value before overlay / when the file or key is absent.
 //  3. Kong default (DRY_RUN defaults to true).

@@ -13,6 +13,20 @@ export const Settings: React.FunctionComponent = () => {
           <ul className="space-y-2 font-medium">
             <li>
               <NavLink
+                to="dry-run"
+                className={({ isActive }) =>
+                  isActive
+                    ? 'flex items-center p-2 text-gray-900 rounded-lg dark:text-white bg-blue-700 dark:bg-blue-700 group'
+                    : 'flex items-center p-2 text-gray-900 rounded-lg dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700 group'
+                }
+              >
+                <Icon name="flag" size={24} style="fill-gray-500" />
+                <span className="pr-3" />
+                Global Dry Run
+              </NavLink>
+            </li>
+            <li>
+              <NavLink
                 to="notifications"
                 className={({ isActive }) =>
                   isActive

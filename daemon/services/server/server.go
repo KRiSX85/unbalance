@@ -493,7 +493,15 @@ func (s *Server) setTvLibraryPath(c echo.Context) error {
 }
 
 func (s *Server) toggleDryRun(c echo.Context) error {
-	return c.JSON(200, s.core.ToggleDryRun())
+	var req domain.SetDryRunRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid dry-run request")
+	}
+	config, err := s.core.SetDryRun(req.DryRun, req.Confirm)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusConflict, err.Error())
+	}
+	return c.JSON(200, config)
 }
 
 func (s *Server) setNotifyPlan(c echo.Context) error {

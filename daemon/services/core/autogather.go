@@ -101,6 +101,9 @@ func (c *Core) scanAutoGatherStage1WithCancel(shouldStop func() bool) (domain.Au
 // SetTvLibraryPath validates, persists, and returns the normalized library path
 // relative to /mnt/user.
 func (c *Core) SetTvLibraryPath(path string) (*domain.Config, error) {
+	if err := c.configMutationBlocked(); err != nil {
+		return &c.ctx.Config, err
+	}
 	cleaned, err := autogather.ValidateTvLibraryPath(path, autogather.UserShareRoot)
 	if err != nil {
 		return &c.ctx.Config, fmt.Errorf("%s", autogather.FormatLibraryValidationError(err))

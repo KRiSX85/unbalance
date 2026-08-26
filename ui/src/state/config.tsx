@@ -19,7 +19,7 @@ interface ConfigStore {
   tvLibraryPath: string;
   actions: {
     getConfig: () => Promise<void>;
-    toggleDryRun: () => Promise<void>;
+    setDryRun: (dryRun: boolean, confirm: boolean) => Promise<void>;
     setNotifyPlan: (value: number) => Promise<void>;
     setNotifyTransfer: (value: number) => Promise<void>;
     setReservedSpace: (amount: number, unit: string) => Promise<void>;
@@ -65,11 +65,22 @@ export const useConfigStore = create<ConfigStore>()(
           state.tvLibraryPath = config.tvLibraryPath || 'data/media/tv';
         });
       },
-      toggleDryRun: async () => {
+      setDryRun: async (dryRun: boolean, confirm: boolean) => {
+        const config = await Api.setDryRun(dryRun, confirm);
         set((state) => {
-          state.dryRun = !state.dryRun;
+          state.dryRun = config.dryRun;
+          state.version = config.version;
+          state.notifyPlan = config.notifyPlan;
+          state.notifyTransfer = config.notifyTransfer;
+          state.reservedAmount = config.reservedAmount;
+          state.reservedUnit = config.reservedUnit;
+          state.rsyncArgs = config.rsyncArgs;
+          state.verbosity = config.verbosity;
+          state.refreshRate = config.refreshRate;
+          state.logLines = config.logLines;
+          state.speedWindow = config.speedWindow;
+          state.tvLibraryPath = config.tvLibraryPath || 'data/media/tv';
         });
-        await Api.toggleDryRun();
       },
       setNotifyPlan: async (value: number) => {
         set((state) => {

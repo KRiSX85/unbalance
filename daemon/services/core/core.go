@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"sync"
@@ -307,15 +308,72 @@ func (c *Core) GetHistory() *domain.History {
 	return c.state.History
 }
 
-func (c *Core) ToggleDryRun() bool {
-	c.ctx.Config.DryRun = !c.ctx.Config.DryRun
-	if err := c.saveSettings(); err != nil {
-		logger.Yellow("toggleDryRun: unable to save settings: %s", err)
+// configMutationBlocked returns an error when persisted config must not change.
+// Interrupted Stage 3D sessions block all normal config mutations until
+// acknowledged; this never clears interrupted state or resumes work.
+func (c *Core) configMutationBlocked() error {
+	if c.autoGatherControlledBlocksRealOps() {
+		return fmt.Errorf("config changes are blocked while a controlled Auto Gather session is active or awaiting interruption acknowledgement")
 	}
-	return c.ctx.Config.DryRun
+	return nil
+}
+
+// dryRunChangeBlocked returns an error when DRY_RUN must not change because an
+// operation is in flight. Changing DRY_RUN never alters in-progress semantics.
+func (c *Core) dryRunChangeBlocked() error {
+	if err := c.configMutationBlocked(); err != nil {
+		return err
+	}
+	if c.state != nil && c.state.Status != common.OpNeutral {
+		return fmt.Errorf("cannot change dry-run while unbalanced is busy (status %d)", c.state.Status)
+	}
+	if c.isAutoGatherDryRunActive() {
+		return fmt.Errorf("cannot change dry-run while Auto Gather dry-run is active")
+	}
+	if c.isAutoGatherRealSessionActive() {
+		return fmt.Errorf("cannot change dry-run while a real Auto Gather preparation or move is active")
+	}
+	if c.isAutoGatherControlledActive() {
+		return fmt.Errorf("cannot change dry-run while controlled Auto Gather is active")
+	}
+	return nil
+}
+
+// SetDryRun updates the effective runtime dry-run flag and persists it to the
+// configured data-dir unbalanced.env. No service restart is required.
+//
+// Setting dryRun=false (enabling real transfers/deletes) requires confirm=true.
+// The change is refused while Gather/Scatter/Auto Gather work is active or while
+// a Stage 3D interruption awaits acknowledgement. It never executes transfers,
+// clears interrupted state, resumes work, or substitutes for Stage 3C/3D confirmations.
+func (c *Core) SetDryRun(dryRun bool, confirm bool) (*domain.Config, error) {
+	if err := c.dryRunChangeBlocked(); err != nil {
+		return &c.ctx.Config, err
+	}
+
+	if c.ctx.DryRun == dryRun {
+		return &c.ctx.Config, nil
+	}
+
+	if !dryRun && !confirm {
+		return &c.ctx.Config, fmt.Errorf("explicit confirmation is required to disable global dry-run (real transfers and source deletion become possible)")
+	}
+
+	prev := c.ctx.DryRun
+	c.ctx.DryRun = dryRun
+	if err := c.saveSettings(); err != nil {
+		c.ctx.DryRun = prev
+		logger.Yellow("setDryRun: unable to save settings: %s", err)
+		return &c.ctx.Config, fmt.Errorf("unable to persist dry-run setting: %w", err)
+	}
+	return &c.ctx.Config, nil
 }
 
 func (c *Core) SetNotifyPlan(value int) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setNotifyPlan: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.NotifyPlan = value
 	if err := c.saveSettings(); err != nil {
 		logger.Yellow("setNotifyPlan: unable to save settings: %s", err)
@@ -324,6 +382,10 @@ func (c *Core) SetNotifyPlan(value int) *domain.Config {
 }
 
 func (c *Core) SetNotifyTransfer(value int) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setNotifyTransfer: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.NotifyTransfer = value
 	if err := c.saveSettings(); err != nil {
 		logger.Yellow("setNotifyTransfer: unable to save settings: %s", err)
@@ -332,6 +394,10 @@ func (c *Core) SetNotifyTransfer(value int) *domain.Config {
 }
 
 func (c *Core) SetReservedSpace(amount uint64, unit string) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setReservedSpace: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.ReservedAmount = amount
 	c.ctx.Config.ReservedUnit = unit
 	if err := c.saveSettings(); err != nil {
@@ -341,6 +407,9 @@ func (c *Core) SetReservedSpace(amount uint64, unit string) *domain.Config {
 }
 
 func (c *Core) SetRsyncArgs(value []string) (*domain.Config, error) {
+	if err := c.configMutationBlocked(); err != nil {
+		return &c.ctx.Config, err
+	}
 	value = cleanRsyncArgs(value)
 	if err := validateRsyncArgs(value); err != nil {
 		logger.Yellow("setRsyncArgs: rejected args %v: %s", value, err)
@@ -356,14 +425,22 @@ func (c *Core) SetRsyncArgs(value []string) (*domain.Config, error) {
 }
 
 func (c *Core) SetVerbosity(value int) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setVerbosity: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.Verbosity = value
 	if err := c.saveSettings(); err != nil {
-		logger.Yellow("toggleDryRun: unable to save settings: %s", err)
+		logger.Yellow("setVerbosity: unable to save settings: %s", err)
 	}
 	return &c.ctx.Config
 }
 
 func (c *Core) SetRefreshRate(value int) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setRefreshRate: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.RefreshRate = value
 	c.resetSamples(c.state.Operation)
 	if err := c.saveSettings(); err != nil {
@@ -373,6 +450,10 @@ func (c *Core) SetRefreshRate(value int) *domain.Config {
 }
 
 func (c *Core) SetLogLines(value int) *domain.Config {
+	if err := c.configMutationBlocked(); err != nil {
+		logger.Yellow("setLogLines: %s", err)
+		return &c.ctx.Config
+	}
 	c.ctx.Config.LogLines = clampLogLines(value)
 	if err := c.saveSettings(); err != nil {
 		logger.Yellow("setLogLines: unable to save settings: %s", err)
@@ -381,6 +462,9 @@ func (c *Core) SetLogLines(value int) *domain.Config {
 }
 
 func (c *Core) SetAuth(passwordHash string) error {
+	if err := c.configMutationBlocked(); err != nil {
+		return err
+	}
 	c.ctx.Config.AuthPassword = passwordHash
 	return c.saveSettings()
 }
