@@ -275,9 +275,9 @@ func (c *Core) recordScheduleAttempt(occurrenceID, result, detail, sessionID str
 	c.scheduleState.LastResult = result
 	c.scheduleState.LastResultDetail = detail
 	c.scheduleState.LastAttemptAt = now.Format(time.RFC3339)
-	if sessionID != "" {
-		c.scheduleState.LastSessionID = sessionID
-	}
+	// Always replace LastSessionID for this attempt. Claiming/skipping/start_failed
+	// pass "" so a prior Stage 3D session ID cannot linger as stale status.
+	c.scheduleState.LastSessionID = sessionID
 	if result != domain.ScheduleResultStarted {
 		c.scheduleState.LastEndedAt = now.Format(time.RFC3339)
 	}

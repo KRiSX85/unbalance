@@ -976,3 +976,101 @@ func TestScheduleMonthlyStartsStage3DOnceWithBounds(t *testing.T) {
 	}
 }
 
+func TestScheduleClearsStaleSessionIDOnSkipAndStartFailed(t *testing.T) {
+	c, clock := newCoreForScheduleTest(t)
+	autoGatherControlledScanHook = func(c *Core) domain.AutoGatherScanResult {
+		return domain.AutoGatherScanResult{Shows: nil}
+	}
+	t.Cleanup(func() { autoGatherControlledScanHook = nil })
+
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyWeekly, Hour: 3, Minute: 0,
+		Weekdays: []int{int(time.Monday)}, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Successful scheduled start records a session ID.
+	clock.Set(time.Date(2026, 8, 24, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+	deadline := time.Now().Add(2 * time.Second)
+	var started domain.AutoGatherControlledState
+	for time.Now().Before(deadline) {
+		started = c.GetAutoGatherControlledState()
+		if started.SessionID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if started.SessionID == "" {
+		t.Fatal("expected scheduled Stage 3D session")
+	}
+	st := c.GetAutoGatherScheduleStatus()
+	if st.LastSessionID != started.SessionID {
+		t.Fatalf("completed/started attempt must record session ID; got %q want %q", st.LastSessionID, started.SessionID)
+	}
+	priorSession := st.LastSessionID
+	c.StopAutoGatherControlled()
+	deadline = time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		ph := c.GetAutoGatherControlledState().Phase
+		if ph != domain.AutoGatherControlledPhaseRunning && ph != domain.AutoGatherControlledPhaseStopping {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Next weekly Monday: skipped_dry_run must clear the prior session ID.
+	if _, err := c.SetAutoGatherSchedule(domain.AutoGatherScheduleSetRequest{
+		Enabled: true, Frequency: domain.ScheduleFrequencyWeekly, Hour: 3, Minute: 0,
+		Weekdays: []int{int(time.Monday)}, MaxShows: 1, MaxBytes: autoGatherScheduleDefaultBytes, Confirm: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	c.ctx.DryRun = true
+	clock.Set(time.Date(2026, 8, 31, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+	st = c.GetAutoGatherScheduleStatus()
+	if st.LastResult != domain.ScheduleResultSkippedDryRun {
+		t.Fatalf("lastResult=%q", st.LastResult)
+	}
+	if st.LastSessionID != "" {
+		t.Fatalf("skipped_dry_run must clear stale LastSessionID; still %q (was %q)", st.LastSessionID, priorSession)
+	}
+
+	// start_failed after claim must also leave LastSessionID empty.
+	c.ctx.DryRun = false
+	c.recordScheduleAttempt("2026-09-01@03:00", domain.ScheduleResultStarted, "evaluating scheduled occurrence", "stale-should-clear", clock.Now())
+	if c.GetAutoGatherScheduleStatus().LastSessionID != "stale-should-clear" {
+		t.Fatal("precondition: planted stale session id")
+	}
+	c.recordScheduleAttempt("2026-09-01@03:00", domain.ScheduleResultStartFailed, "refused", "", clock.Now())
+	if c.GetAutoGatherScheduleStatus().LastSessionID != "" {
+		t.Fatalf("start_failed must leave LastSessionID empty, got %q", c.GetAutoGatherScheduleStatus().LastSessionID)
+	}
+
+	// A later successful scheduled start records the new session ID only.
+	clock.Set(time.Date(2026, 9, 7, 3, 0, 5, 0, time.Local))
+	c.evaluateAutoGatherSchedule()
+	deadline = time.Now().Add(2 * time.Second)
+	var later domain.AutoGatherControlledState
+	for time.Now().Before(deadline) {
+		later = c.GetAutoGatherControlledState()
+		if later.SessionID != "" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if later.SessionID == "" {
+		t.Fatal("expected later scheduled Stage 3D session")
+	}
+	st = c.GetAutoGatherScheduleStatus()
+	if st.LastSessionID != later.SessionID {
+		t.Fatalf("later success LastSessionID=%q want %q", st.LastSessionID, later.SessionID)
+	}
+	if st.LastSessionID == priorSession {
+		t.Fatal("later success must not reuse prior session id")
+	}
+	c.StopAutoGatherControlled()
+}
+
